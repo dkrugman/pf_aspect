@@ -1,4 +1,20 @@
-#include std_head_fs.inc
+// ----- boiler-plate code for fragment shader variable definition
+#version 120
+//precision highp float;
+
+uniform sampler2D tex0;
+uniform sampler2D tex1;
+uniform sampler2D tex2;
+uniform vec3 unib[5];
+// see docstring Buffer
+uniform vec3 unif[20];
+// see docstring Shape
+
+varying float dist;
+varying float fog_start;
+varying float is_3d;
+
+//fragcolor
 
 varying vec2 texcoordoutf;
 varying vec2 texcoordoutb;
