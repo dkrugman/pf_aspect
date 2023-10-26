@@ -24,6 +24,7 @@ viewer:
   display_h: null                         # height of display surface
   display_power: 0                        # default=0. choices={0, 1}, 0 will use legacy `vcgencmd` and 1 will use `xset` to blank the display
   use_glx: False                          # default=False. Set to True on linux with xserver running
+  use_sdl2: False                          # default=True. Needed for running pi3d with sdl2 on Pi2 and Pi3
 
   mat_images: 0.01                        # default=0.01, True, automatically mat all images. False, don't automatically mat any images. Real value, auto-mat all images with aspect ratio difference > than value
   mat_type: null                          # default=null, A string containing the mat types to choose from when matting images. It can consist of any or
