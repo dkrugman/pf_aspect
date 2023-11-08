@@ -130,6 +130,13 @@ class ViewerDisplay:
 
     @display_is_on.setter
     def display_is_on(self, on_off):
+
+        # do this anyway, shouldn't do any harm if pi3d.USE_SDL2 is not set TODO refactor the following section - use __display_power == 2 ?
+        if on_off is True:
+            self.__display.disable_screensaver() # screensaver stops working - screen stays on indefinitely
+        else:
+            self.__display.enable_screensaver() # screensaver start - will turn after the the timeout period
+
         self.__logger.debug("Switch display (display_power=%d).", self.__display_power)
         if self.__display_power == 0:
             try:  # vcgencmd only applies to raspberry pi
@@ -441,6 +448,9 @@ class ViewerDisplay:
         self.__slide.unif[55] = 1.0  # brightness
         self.__textblocks = [None, None]
         self.__flat_shader = pi3d.Shader("uv_flat")
+
+        # turn off screensaver
+        self.__display.disable_screensaver() # screen will stay on
 
         if self.__text_bkg_hgt:
             bkg_hgt = int(min(self.__display.width, self.__display.height) * self.__text_bkg_hgt)
