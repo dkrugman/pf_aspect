@@ -4,11 +4,13 @@ import time
 import logging
 import threading
 from picframe import get_image_meta
+from picframe.video_streamer import get_dimensions
 
 
 class ImageCache:
 
     EXTENSIONS = ['.png', '.jpg', '.jpeg', '.heif', '.heic']
+    VIDEO_EXTENSIONS = ['.mp4']
     EXIF_TO_FIELD = {'EXIF FNumber': 'f_number',
                      'Image Make': 'make',
                      'Image Model': 'model',
@@ -377,7 +379,7 @@ class ImageCache:
         for dir, _date in modified_folders:
             for file in os.listdir(dir):
                 base, extension = os.path.splitext(file)
-                if (extension.lower() in ImageCache.EXTENSIONS
+                if (extension.lower() in (ImageCache.EXTENSIONS + ImageCache.VIDEO_EXTENSIONS)
                         # have to filter out all the Apple junk
                         and '.AppleDouble' not in dir and not file.startswith('.')):
                     full_file = os.path.join(dir, file)
@@ -462,6 +464,10 @@ class ImageCache:
             self.__purge_files = False
 
     def __get_exif_info(self, file_path_name):
+        ext = os.path.splitext(file_path_name)[1].lower()
+        if ext in ImageCache.VIDEO_EXTENSIONS: # no exif info available
+            dimensions = get_dimensions(file_path_name)
+            return {'width': dimensions[0], 'height': dimensions[1]} # return early with min info for videos
         exifs = get_image_meta.GetImageMeta(file_path_name)
         # Dict to store interesting EXIF data
         # Note, the 'key' must match a field in the 'meta' table
@@ -470,7 +476,6 @@ class ImageCache:
         e['orientation'] = exifs.get_orientation()
 
         width, height = exifs.get_size()
-        ext = os.path.splitext(file_path_name)[1].lower()
         if ext not in ('.heif', '.heic') and e['orientation'] in (5, 6, 7, 8):
             width, height = height, width  # swap values
         e['width'] = width
