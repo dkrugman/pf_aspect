@@ -37,24 +37,19 @@ class VideoStreamer:
             self.t = None
 
     def pipe_thread(self):
-        pipe = None
         while not self.kill_thread:
-            st_tm = time.time()
-            if pipe is None:
-                pipe = subprocess.Popen(self.command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=-1)
-            self.image = np.frombuffer(pipe.stdout.read(self.H * self.W * self.P), dtype='uint8')
-            pipe.stdout.flush() # presumably nothing else has arrived since read()
-            pipe.stderr.flush() # ffmpeg sends commentary to stderr
-            if len(self.image) < self.H * self.W * self.P: # end of video, reload
-                pipe.terminate()
-                pipe = None
-            else:
-                self.image.shape = (self.H, self.W, self.P)
-                self.flag = True
-            step = time.time() - st_tm
-            time.sleep(max(0.04 - step, 0.0)) # adding fps info to ffmpeg doesn't seem to have any effect
+            with subprocess.Popen(self.command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=-1) as pipe:
+                while pipe.poll() is None and not self.kill_thread:
+                    st_tm = time.time()
+                    self.flag = False
+                    self.image = np.frombuffer(pipe.stdout.read(self.H * self.W * self.P), dtype='uint8') # overwrite array
+                    self.image.shape = (self.H, self.W, self.P)
+                    self.flag = True
+                    step = time.time() - st_tm
+                    time.sleep(max(0.04 - step, 0.0)) # adding fps info to ffmpeg doesn't seem to have any effect
 
     def kill(self):
         self.kill_thread = True
         if self.t is not None:
             self.t.join()
+        del self.image
