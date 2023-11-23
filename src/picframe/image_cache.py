@@ -4,7 +4,7 @@ import time
 import logging
 import threading
 from picframe import get_image_meta
-from picframe.video_streamer import get_dimensions
+from picframe.video_streamer import VideoInfo
 
 
 class ImageCache:
@@ -466,8 +466,8 @@ class ImageCache:
     def __get_exif_info(self, file_path_name):
         ext = os.path.splitext(file_path_name)[1].lower()
         if ext in ImageCache.VIDEO_EXTENSIONS: # no exif info available
-            dimensions = get_dimensions(file_path_name)
-            return {'width': dimensions[0], 'height': dimensions[1]} # return early with min info for videos
+            video_info = VideoInfo(file_path_name) # TODO video info may contain rubbish if ffprobe failed
+            return {'width': video_info.width, 'height': video_info.height} # return early with min info for videos TODO duration available in video_info
         exifs = get_image_meta.GetImageMeta(file_path_name)
         # Dict to store interesting EXIF data
         # Note, the 'key' must match a field in the 'meta' table

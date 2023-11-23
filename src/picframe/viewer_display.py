@@ -92,6 +92,7 @@ class ViewerDisplay:
         self.__sbg = None  # slide for foreground
         self.__next_tm = 0.0
         self.__name_tm = 0.0
+        self.__start_tm = 0.0
         self.__in_transition = False
         self.__matter = None
         self.__prev_clock_time = None
@@ -481,10 +482,12 @@ class ViewerDisplay:
             self.__draw_clock()
 
         loop_running = self.__display.loop_running()
+        skip_image = False
         tm = time.time()
         if pics is not None:
             new_sfg = self.__tex_load(pics, (self.__display.width, self.__display.height))
             tm = time.time()
+            self.__start_tm = tm
             self.__next_tm = tm + time_delay
             self.__name_tm = tm + fade_time + self.__show_text_tm  # text starts after slide transition
             if new_sfg is not None:  # this is a possible return value which needs to be caught
@@ -543,8 +546,11 @@ class ViewerDisplay:
             self.__in_transition = False
 
         if self.__video_streamer is not None and self.__video_streamer.flag is True:
-            self.__sfg.update_ndarray(self.__video_streamer.image, 0)
-            self.__video_streamer.flag = False
+            if (tm - self.__start_tm) > self.__video_streamer.duration: # move on to next image at end of video TODO alow repeat behaviour?
+                skip_image = True
+            else:
+                self.__sfg.update_ndarray(self.__video_streamer.image, 0)
+                self.__video_streamer.flag = False
 
         self.__slide.draw()
 
@@ -572,7 +578,7 @@ class ViewerDisplay:
             if block is not None:
                 block.sprite.draw()
 
-        return (loop_running, False)  # now returns tuple with skip image flag added
+        return (loop_running, skip_image)  # now returns tuple with skip image flag added
 
     def slideshow_stop(self):
         if self.__video_streamer is not None:
