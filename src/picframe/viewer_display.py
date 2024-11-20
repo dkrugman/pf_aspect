@@ -79,7 +79,6 @@ class ViewerDisplay:
         self.__display_power = int(config['display_power'])
         self.__use_sdl2 = config['use_sdl2']
         self.__use_glx = config['use_glx']
-        self.__use_sdl2 = config['use_sdl2'] #TODO check conflict between GLX and SDL2 tests OK initially
         self.__alpha = 0.0  # alpha - proportion front image to back
         self.__delta_alpha = 1.0
         self.__display = None
@@ -103,19 +102,16 @@ class ViewerDisplay:
         self.__clock_text_sz = config['clock_text_sz']
         self.__clock_format = config['clock_format']
         self.__clock_opacity = config['clock_opacity']
-        self.__video_streamer = None
         self.__clock_top_bottom = config['clock_top_bottom']
         self.__clock_wdt_offset_pct = config['clock_wdt_offset_pct']
         self.__clock_hgt_offset_pct = config['clock_hgt_offset_pct']
         self.__image_overlay = None
         self.__prev_overlay_time = None
+        self.__video_streamer = None
         ImageFile.LOAD_TRUNCATED_IMAGES = True  # occasional damaged file hangs app
 
     @property
     def display_is_on(self):
-        on_off = self.__display.is_screensaver_enabled() # returns None unless using SDL2 and wayland TODO fix cases with SDL and X11
-        if on_off is not None:
-            return not on_off # i.e. screensaver enabled means display is OFF
         if self.__display_power == 0:
             try:  # vcgencmd only applies to raspberry pi
                 state = str(subprocess.check_output(["vcgencmd", "display_power"]))
@@ -145,13 +141,6 @@ class ViewerDisplay:
     @display_is_on.setter
     def display_is_on(self, on_off): #on_off is True turns screen on, False turns it off
         self.__logger.debug("Switch display (display_power=%d).", self.__display_power)
-
-        # do this anyway, shouldn't do any harm if pi3d.USE_SDL2 is not set
-        if on_off is True:
-            self.__display.disable_screensaver() # screensaver stops working - screen stays on indefinitely
-        else:
-            self.__display.enable_screensaver() # screensaver start - will turn after the the timeout period
-
         if self.__display_power == 0:
             try:  # vcgencmd only applies to raspberry pi
                 if on_off is True:
