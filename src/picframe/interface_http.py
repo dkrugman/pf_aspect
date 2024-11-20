@@ -5,6 +5,7 @@ import os
 import logging
 import json
 import threading
+import base64
 
 try:
     from http.server import BaseHTTPRequestHandler, HTTPServer  # py3
@@ -45,7 +46,33 @@ def heif_to_jpg(fname):
 
 class RequestHandler(BaseHTTPRequestHandler):
 
+    def do_AUTHHEAD(self):
+        if self.server._auth is not None:
+            if self.headers.get("Authorization") == None:
+                self.send_response(401)
+                self.send_header("WWW-Authenticate", 'Basic realm="Restricted"')
+                self.send_header("Content-type", "text/html")
+                self.end_headers()
+                response_message = "Error: No authorization header received. Please provide valid credentials.\n"
+                self.wfile.write(response_message.encode('utf-8'))
+                self.connection.close()
+                return False
+            elif self.headers.get("Authorization") != "Basic " + self.server._auth:
+                self.send_response(403)
+                self.send_header("Content-type", "text/html")
+                self.end_headers()
+                response_message = "Error: Invalid authentication credentials. Access denied.\n"
+                self.wfile.write(response_message.encode('utf-8'))
+                self.connection.close()
+                return False
+        return True
+
     def do_GET(self):  # noqa: C901
+        if not self.do_AUTHHEAD():
+            source_ip = self.client_address[0]
+            log_message = f"Authentication failed for source IP: {source_ip}"
+            self.server._logger.warning(log_message)
+            return
         try:
             path_split = self.path.split("?")
             page_ok = False
@@ -91,7 +118,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                         for subkey in self.server._setters:
                             message[subkey] = getattr(self.server._controller, subkey)
                     elif key in dir(self.server._controller):
-                        if value != "":  # parse_qsl can return empty string for value when just querying
+                        if value != "" or key in ("subdirectory", "location_filter", "tags_filter"):  # parse_qsl can return empty string for value when just querying
                             lwr_val = value.lower()
                             if lwr_val in ("true", "on", "yes"):  # this only works for simple values *not* json style kwargs # noqa: E501
                                 value = True
@@ -140,7 +167,17 @@ class RequestHandler(BaseHTTPRequestHandler):
 
 
 class InterfaceHttp(HTTPServer):
-    def __init__(self, controller, html_path, pic_dir, no_files_img, port=9000):
+    def __init__(
+            self,
+            controller,
+            html_path,
+            pic_dir,
+            no_files_img,
+            port=9000,
+            auth=False,
+            username=None,
+            password=None,
+        ):
         super(InterfaceHttp, self).__init__(("0.0.0.0", port), RequestHandler)
         # NB name mangling throws a spanner in the works here!!!!!
         # *no* __dunders
@@ -150,6 +187,9 @@ class InterfaceHttp(HTTPServer):
         self._pic_dir = os.path.expanduser(pic_dir)
         self._no_files_img = os.path.expanduser(no_files_img)
         self._html_path = os.path.expanduser(html_path)
+        self._auth = None
+        if auth:
+            self._auth = base64.b64encode(f"{username}:{password}".encode()).decode()
         # TODO check below works with all decorated methods.. seems to work
         controller_class = controller.__class__
         self._setters = [method for method in dir(controller_class)
@@ -158,4 +198,5 @@ class InterfaceHttp(HTTPServer):
         t.start()
 
     def stop(self):
-        self.shutdown()
+        t = threading.Thread(target=self.shutdown, daemon=True)
+        t.start()

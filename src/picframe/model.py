@@ -30,9 +30,9 @@ DEFAULT_CONFIG = {
         'display_y': 0,
         'display_w': None,
         'display_h': None,
-        'display_power': 0,
+        'display_power': 2,
         'use_glx': False,                          # default=False. Set to True on linux with xserver running
-        'use_sdl2': False,
+        'use_sdl2': True,
         'test_key': 'test_value',
         'mat_images': True,
         'mat_type': None,
@@ -48,6 +48,9 @@ DEFAULT_CONFIG = {
         'clock_text_sz': 120,
         'clock_format': "%I:%M",
         'clock_opacity': 1.0,
+        'clock_top_bottom': "T",
+        'clock_wdt_offset_pct': 3.0,
+        'clock_hgt_offset_pct': 3.0,
         'menu_text_sz': 40,
         'menu_autohide_tm': 10.0,
         'geo_suppress_list': [],
@@ -76,8 +79,11 @@ DEFAULT_CONFIG = {
         'db_file': '~/picframe_data/data/pictureframe.db3',
         'portrait_pairs': False,
         'deleted_pictures': '~/DeletedPictures',
+        'update_interval': 2.0,
         'log_level': 'WARNING',
         'log_file': '',
+        'location_filter': '',
+        'tags_filter': '',
     },
     'mqtt': {
         'use_mqtt': False,  # Set tue true, to enable mqtt
@@ -192,12 +198,16 @@ class Model:
                                                     model_config['follow_links'],
                                                     os.path.expanduser(model_config['db_file']),
                                                     self.__geo_reverse,
+                                                    model_config['update_interval'],
                                                     model_config['portrait_pairs'])
         self.__deleted_pictures = model_config['deleted_pictures']
         self.__no_files_img = os.path.expanduser(model_config['no_files_img'])
         self.__sort_cols = model_config['sort_cols']
         self.__col_names = None
-        self.__where_clauses = {}  # these will be modified by controller
+        # init where clauses through setters
+        self.__where_clauses = {}
+        self.location_filter = model_config['location_filter']
+        self.tags_filter = model_config['tags_filter']
 
     def get_viewer_config(self):
         return self.__config['viewer']
@@ -209,6 +219,16 @@ class Model:
         return self.__config['mqtt']
 
     def get_http_config(self):
+        if 'auth' in self.__config['http'] and self.__config['http']['auth'] and self.__config['http']['password'] is None:
+            http_parent = os.path.abspath(os.path.join(self.__config['http']['path'], os.pardir))
+            password_path = os.path.join(http_parent, 'basic_auth.txt')
+            if not os.path.exists(password_path):
+                new_password = self.__generate_random_string(64)
+                with open(password_path, "w") as f:
+                    f.write(new_password)
+            with open(password_path, "r") as f:
+                password = f.read()
+                self.__config['http']['password'] = password
         return self.__config['http']
 
     def get_peripherals_config(self):
@@ -253,6 +273,10 @@ class Model:
         return self.__image_cache.EXIF_TO_FIELD
 
     @property
+    def update_interval(self):
+        return self.__config['model']['update_interval']
+
+    @property
     def shuffle(self):
         return self.__config['model']['shuffle']
 
@@ -260,6 +284,56 @@ class Model:
     def shuffle(self, val: bool):
         self.__config['model']['shuffle'] = val  # TODO should this be altered in config?
         self.__reload_files = True
+
+    @property
+    def location_filter(self):
+        return self.__config['model']['location_filter']
+
+    @location_filter.setter
+    def location_filter(self, val):
+        self.__config['model']['location_filter'] = val
+        if len(val) > 0:
+            self.set_where_clause("location_filter", self.__build_filter(val, "location"))
+        else:
+            self.set_where_clause("location_filter")  # remove from where_clause
+        self.__reload_files = True
+
+    @property
+    def tags_filter(self):
+        return self.__config['model']['tags_filter']
+
+    @tags_filter.setter
+    def tags_filter(self, val):
+        self.__config['model']['tags_filter'] = val
+        if len(val) > 0:
+            self.set_where_clause("tags_filter", self.__build_filter(val, "tags"))
+        else:
+            self.set_where_clause("tags_filter")  # remove from where_clause
+        self.__reload_files = True
+
+    def __build_filter(self, val, field):
+        if val.count("(") != val.count(")"):
+            return None  # this should clear the filter and not raise an error
+        val = val.replace(";", "").replace("'", "").replace("%", "").replace('"', '')  # SQL scrambling
+        tokens = ("(", ")", "AND", "OR", "NOT")  # now copes with NOT
+        val_split = val.replace("(", " ( ").replace(")", " ) ").split()  # so brackets not joined to words
+        filter = []
+        last_token = ""
+        for s in val_split:
+            s_upper = s.upper()
+            if s_upper in tokens:
+                if s_upper in ("AND", "OR"):
+                    if last_token in ("AND", "OR"):
+                        return None  # must have a non-token between
+                    last_token = s_upper
+                filter.append(s)
+            else:
+                if last_token is not None:
+                    filter.append("{} LIKE '%{}%'".format(field, s))
+                else:
+                    filter[-1] = filter[-1].replace("%'", " {}%'".format(s))
+                last_token = None
+        return "({})".format(" ".join(filter))  # if OR outside brackets will modify the logic of rest of where clauses
 
     def set_where_clause(self, key, value=None):
         # value must be a string for later join()
@@ -426,3 +500,8 @@ class Model:
         self.__file_index = 0
         self.__num_run_through = 0
         self.__reload_files = False
+
+    def __generate_random_string(self, length):
+        random_bytes = os.urandom(length // 2)
+        random_string = ''.join('{:02x}'.format(ord(chr(byte))) for byte in random_bytes)
+        return random_string
