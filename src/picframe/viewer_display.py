@@ -634,7 +634,12 @@ class ViewerDisplay:
             if block is not None:
                 block.sprite.draw()
 
-        return (loop_running, skip_image)  # now returns tuple with skip image flag added
+        video_time = None
+        if self.__video_streamer is not None:
+            video_duration = self.__video_streamer.duration * self.__video_streamer.fps / self.__fps
+            if video_duration > time_delay:
+                video_time = video_duration
+        return (loop_running, skip_image, video_time)  # now returns tuple with skip_image flag and video_time added
 
     def slideshow_stop(self):
         if self.__video_streamer is not None:
