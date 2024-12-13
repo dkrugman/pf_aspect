@@ -9,7 +9,7 @@ from picframe import mat_image, get_image_meta
 from datetime import datetime
 from picframe.video_streamer import VideoStreamer
 
-VIDEO_EXTENSIONS = ['.mp4']
+VIDEO_EXTENSIONS = ['.mp4', '.mkv', '.flv']
 
 # supported display modes for display switch
 dpms_mode = ("unsupported", "pi", "x_dpms")
@@ -169,6 +169,12 @@ class ViewerDisplay:
                 self.__logger.debug("Cause: %s", e)
         else:
             self.__logger.warning("Unsupported setting for display_power=%d.", self.__display_power)
+        if self.__video_streamer is not None:
+            if on_off:
+                 self.__video_streamer.restart()
+            else:
+                 self.__video_streamer.pause()
+
 
     def set_show_text(self, txt_key=None, val="ON"):
         if txt_key is None:
@@ -340,28 +346,28 @@ class ViewerDisplay:
                 (w, h) = im.size
                 screen_aspect, image_aspect, diff_aspect = self.__get_aspect_diff(size, im.size)
 
-            if self.__blur_edges and size:
-                if diff_aspect > 0.01:
-                    (sc_b, sc_f) = (size[1] / im.size[1], size[0] / im.size[0])
-                    if screen_aspect > image_aspect:
-                        (sc_b, sc_f) = (sc_f, sc_b)  # swap round
-                    (w, h) = (round(size[0] / sc_b / self.__blur_zoom), round(size[1] / sc_b / self.__blur_zoom))
-                    (x, y) = (round(0.5 * (im.size[0] - w)), round(0.5 * (im.size[1] - h)))
-                    box = (x, y, x + w, y + h)
-                    blr_sz = [int(x * 512 / size[0]) for x in size]
-                    im_b = im.resize(size, resample=0, box=box).resize(blr_sz)
-                    im_b = im_b.filter(ImageFilter.GaussianBlur(self.__blur_amount))
-                    im_b = im_b.resize(size, resample=Image.BICUBIC)
-                    im_b.putalpha(round(255 * self.__edge_alpha))  # to apply the same EDGE_ALPHA as the no blur method.
-                    im = im.resize([int(x * sc_f) for x in im.size], resample=Image.BICUBIC)
-                    """resize can use Image.LANCZOS (alias for Image.ANTIALIAS) for resampling
-                    for better rendering of high-contranst diagonal lines. NB downscaled large
-                    images are rescaled near the start of this try block if w or h > max_dimension
-                    so those lines might need changing too.
-                    """
-                    im_b.paste(im, box=(round(0.5 * (im_b.size[0] - im.size[0])),
-                                        round(0.5 * (im_b.size[1] - im.size[1]))))
-                    im = im_b  # have to do this as paste applies in place
+                if self.__blur_edges and size:
+                    if diff_aspect > 0.01:
+                        (sc_b, sc_f) = (size[1] / im.size[1], size[0] / im.size[0])
+                        if screen_aspect > image_aspect:
+                            (sc_b, sc_f) = (sc_f, sc_b)  # swap round
+                        (w, h) = (round(size[0] / sc_b / self.__blur_zoom), round(size[1] / sc_b / self.__blur_zoom))
+                        (x, y) = (round(0.5 * (im.size[0] - w)), round(0.5 * (im.size[1] - h)))
+                        box = (x, y, x + w, y + h)
+                        blr_sz = [int(x * 512 / size[0]) for x in size]
+                        im_b = im.resize(size, resample=0, box=box).resize(blr_sz)
+                        im_b = im_b.filter(ImageFilter.GaussianBlur(self.__blur_amount))
+                        im_b = im_b.resize(size, resample=Image.BICUBIC)
+                        im_b.putalpha(round(255 * self.__edge_alpha))  # to apply the same EDGE_ALPHA as the no blur method.
+                        im = im.resize([int(x * sc_f) for x in im.size], resample=Image.BICUBIC)
+                        """resize can use Image.LANCZOS (alias for Image.ANTIALIAS) for resampling
+                        for better rendering of high-contranst diagonal lines. NB downscaled large
+                        images are rescaled near the start of this try block if w or h > max_dimension
+                        so those lines might need changing too.
+                        """
+                        im_b.paste(im, box=(round(0.5 * (im_b.size[0] - im.size[0])),
+                                            round(0.5 * (im_b.size[1] - im.size[1]))))
+                        im = im_b  # have to do this as paste applies in place
             tex = pi3d.Texture(im, blend=True, m_repeat=True, free_after_load=True)
         except Exception as e:
             self.__logger.warning("Can't create tex from file: \"%s\" or \"%s\"", pics[0].fname, pics[1])
@@ -596,7 +602,7 @@ class ViewerDisplay:
             self.__in_transition = False
 
         if self.__video_streamer is not None and self.__video_streamer.flag is True:
-            if (tm - self.__start_tm) > self.__video_streamer.duration: # move on to next image at end of video TODO alow repeat behaviour?
+            if (tm - self.__start_tm) > (self.__video_streamer.duration + self.__video_streamer.paused_time): # move on to next image at end of video TODO alow repeat behaviour?
                 skip_image = True
             else:
                 self.__sfg.update_ndarray(self.__video_streamer.image, 0)
@@ -636,7 +642,7 @@ class ViewerDisplay:
 
         video_time = None
         if self.__video_streamer is not None:
-            video_duration = self.__video_streamer.duration * self.__video_streamer.fps / self.__fps
+            video_duration = (self.__video_streamer.duration + self.__video_streamer.paused_time) * self.__video_streamer.fps / self.__fps
             if video_duration > time_delay:
                 video_time = video_duration
         return (loop_running, skip_image, video_time)  # now returns tuple with skip_image flag and video_time added
