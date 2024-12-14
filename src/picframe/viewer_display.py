@@ -169,11 +169,13 @@ class ViewerDisplay:
                 self.__logger.debug("Cause: %s", e)
         else:
             self.__logger.warning("Unsupported setting for display_power=%d.", self.__display_power)
-        if self.__video_streamer is not None:
-            if on_off:
-                 self.__video_streamer.restart()
-            else:
-                 self.__video_streamer.pause()
+        ### TODO pausing the ffmpeg process can make picframe hang if the screen is blanked for a while
+        # this needs to be done in combination with Controller.paused() functionality
+        #if self.__video_streamer is not None:
+        #    if on_off:
+        #         self.__video_streamer.restart()
+        #    else:
+        #         self.__video_streamer.pause()
 
 
     def set_show_text(self, txt_key=None, val="ON"):
