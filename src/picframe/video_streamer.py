@@ -8,11 +8,11 @@ import json
 
 
 class VideoInfo:
-    def __init__(self, video_path):
-        probe_cmd = f"ffmpeg -i {video_path}"
+    def __init__(self, video_path): # TODO put whole thing in try/catch in case of different formats?
+        probe_cmd = f"ffmpeg -i {video_path}" # more comprehensive and reliable info than ffinfo
         proc = subprocess.Popen(probe_cmd, shell=True, text=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         (output, error) = proc.communicate()
-        probe_result = (output if proc.returncode == 0 else error).split("\n")
+        probe_result = (output if proc.returncode == 0 else error).split("\n") # usually stderr as expects dest file
 
         self.width = self.height = self.fps = self.duration = None
         err_msg = ""
@@ -23,19 +23,17 @@ class VideoInfo:
             if "Video:" in ln:
                 str_split = ln.split(",")
                 for v_info in str_split:
-                    if "x" in v_info:
+                    if "x" in v_info: # only seen one in a small sample, but checking for 1 char a bit risky
                         try:
                             (self.width, self.height) = (int(x) for x in v_info.split()[0].split("x"))
                         except:
                             (self.width, self.height) = (240, 180)
-                    elif "tbr" in v_info:
+                    elif "tbr" in v_info: # fps sometimes contains unreliable values such as 1k
                         try:
                             self.fps = int(v_info.split()[0])
                         except:
                             self.fps = 24
 
-        with  open("/home/pi/log2.txt", "a") as f:
-            f.write(f"{self.width}, {self.height}, {self.fps}, {self.duration}, {err_msg} == {video_path}\n")
 
 class VideoStreamer:
     def __init__(self, video_path):
@@ -76,6 +74,7 @@ class VideoStreamer:
                     elif paused and not self.pause_thread: # continue thread running
                         paused = False
                         pipe.send_signal(signal.SIGCONT)
+
                     if not paused:
                         st_tm = time.time()
                         self.flag = False
