@@ -5,34 +5,29 @@ import threading
 import signal
 import time
 import json
+import vlc
 
 
 class VideoInfo:
     def __init__(self, video_path): # TODO put whole thing in try/catch in case of different formats?
-        probe_cmd = f"ffmpeg -i {video_path}" # more comprehensive and reliable info than ffinfo
-        proc = subprocess.Popen(probe_cmd, shell=True, text=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        (output, error) = proc.communicate()
-        probe_result = (output if proc.returncode == 0 else error).split("\n") # usually stderr as expects dest file
+        self._parseReady = False
+        self.player = self.width = self.height = self.fps = self.duration = None
 
-        self.width = self.height = self.fps = self.duration = None
-        err_msg = ""
-        for ln in probe_result:
-            if "Duration:" in ln:
-                dur_split = ln.split(",")[0].split(":")
-                self.duration = float(dur_split[1]) * 3600 + float(dur_split[2]) * 60 + float(dur_split[3])
-            if "Video:" in ln:
-                str_split = ln.split(",")
-                for v_info in str_split:
-                    if "x" in v_info: # only seen one in a small sample, but checking for 1 char a bit risky
-                        try:
-                            (self.width, self.height) = (int(x) for x in v_info.split()[0].split("x"))
-                        except:
-                            (self.width, self.height) = (240, 180)
-                    elif "tbr" in v_info: # fps sometimes contains unreliable values such as 1k
-                        try:
-                            self.fps = int(v_info.split()[0])
-                        except:
-                            self.fps = 24
+        instance = vlc.Instance('--no-audio')
+        self.player = instance.media_player_new()
+        media = instance.media_new_path(video_path)
+        self.player.set_media(media)
+        events = media.event_manager()
+        events.event_attach(vlc.EventType.MediaParsedChanged, self.ParseReceived)
+        media.parse_with_options(1, 0)
+        while self._parseReady == False:
+            time.sleep(0.1)
+        self.width, self.height = self.player.video_get_size()
+        self.duration = media.get_duration() # Total duration in milliseconds
+        self.fps = self.player.get_fps()
+    
+    def  ParseReceived(self, event):
+        self._parseReady = True
 
 
 class VideoStreamer:
