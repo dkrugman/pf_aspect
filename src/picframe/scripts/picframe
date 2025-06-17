@@ -1,0 +1,104 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+# Logs all function calls and returns dynamically, in the order called
+# with the complete call->return line replacing the original call line
+# by moving cursor up, replacing the original line, and then back down
+# to continue logging.
+#
+# Note: blank lines may appear in live output, but not in trace.log file
+
+import re
+import sys
+import os
+import time
+from picframe.start import main
+
+FUNC_COL_WIDTH = 32
+LOC_COL_WIDTH  = 28
+SUF_COL_WIDTH  = 42
+
+FILTER_PATH = "/home/pi/src/picframe/src/picframe"
+IGNORE_FUNCS = {
+    'time_delay', 'fade_time', 'paused', 'is_in_transition',
+    'is_video_playing', '__draw_overlay', 'clock_is_on',
+    'slideshow_is_running', '__update_pointer_position',
+    '__pointer_moved', '__handle_touch_input',
+    'menu_is_on', 'check_input', '<genexpr>', 'EXIF_TO_FIELD'
+}
+
+CALL_LINES = []
+CALL_MAP = {}
+CURSOR_LINE = 0 
+
+class StdIOTracker:        # Accounts for any lines from other loggers/output to stdout/stderr 
+    def __init__(self, real_stream):
+        self.real_stream = real_stream
+        self._buffer = ""
+
+    def write(self, text):
+        global CURSOR_LINE
+        self._buffer += text
+        while '\n' in self._buffer:
+            line, self._buffer = self._buffer.split('\n', 1)
+            full_line = f"{line}\n"
+            self.real_stream.write(full_line)
+            CURSOR_LINE += 1
+
+    def flush(self):
+        if self._buffer:
+            self.real_stream.write(f"{self._buffer}")
+            self._buffer = ""
+            CURSOR_LINE += 1
+        self.real_stream.flush()
+
+# Replace sys.stdout and sys.stderr
+sys.stdout = StdIOTracker(sys.stdout)
+sys.stderr = StdIOTracker(sys.stderr)
+
+def trace_calls(frame, event, arg):
+    global CURSOR_LINE
+    code = frame.f_code
+    func_name = code.co_name
+
+    if func_name in IGNORE_FUNCS:
+        return None
+    if not code.co_filename.startswith(FILTER_PATH):
+        return None
+
+    fn = f"{func_name}()".ljust(FUNC_COL_WIDTH)
+    loc_str = f"{os.path.basename(code.co_filename)}:{frame.f_lineno}"
+    loc = loc_str.ljust(LOC_COL_WIDTH)
+
+    if event == 'call':
+        caller = frame.f_back
+        caller_loc = f"{os.path.basename(caller.f_code.co_filename)}:{caller.f_lineno}" if caller else ""
+        suffix_text = f"(from {caller_loc})" if caller_loc != loc_str else ""
+        suffix = (f" {suffix_text}" if suffix_text else "").ljust(SUF_COL_WIDTH)
+        line = f"CALL → {fn} @ {loc}{suffix}"
+        CALL_LINES.append(line)
+        print(line + '\n', end='')  # print but don't count it - stdout will count it
+        CALL_MAP[frame] = (len(CALL_LINES) - 1, time.perf_counter(), CURSOR_LINE -1)
+        return trace_calls
+
+    elif event == 'return':
+        if frame in CALL_MAP:
+            index, start_time, call_line_num = CALL_MAP.pop(frame)
+            elapsed = time.perf_counter() - start_time
+            ret_loc = f"{os.path.basename(code.co_filename)}:{frame.f_lineno}"
+            ret_info = f"← RET @ {ret_loc.ljust(LOC_COL_WIDTH)} ({elapsed*1000:6.2f}ms)"
+            updated_line = CALL_LINES[index] + f"  {ret_info}"
+            CALL_LINES[index] = updated_line
+
+            lines_up = CURSOR_LINE - call_line_num
+#            print(f"\033[36m{updated_line}\033[0m" + '  ' + str(lines_up) + ' ' * 10)
+            print(f"\033[{lines_up}A", end='')           # move up
+            print('\r' + f"\033[36m{updated_line}\033[0m" + ' ' * 10)         # overwrite
+            print(f"\033[{lines_up - 1}B", end='')           # move down (back to where we were)
+            CURSOR_LINE -= 1
+    return trace_calls
+
+if __name__ == '__main__':
+    sys.argv[0] = re.sub(r'(-script\.pyw|\.exe)?$', '', sys.argv[0])
+    sys.settrace(trace_calls)
+    sys.exit(main())
