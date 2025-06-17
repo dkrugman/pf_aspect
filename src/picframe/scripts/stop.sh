@@ -1,5 +1,5 @@
 #!/bin/bash
 
 # Stop Picframe
-process_id=`/bin/ps -C picframe -o pid=`
+process_id=`pgrep -f ^python.*picframe$`
 sudo kill -9 $process_id
