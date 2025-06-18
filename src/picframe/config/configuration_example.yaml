@@ -153,26 +153,26 @@ aspect:
   set_size: 10,                           # number of images in each orientation  
   width: 2894,                            # width of the display in pixels
   height: 2160,                           # height of the display in pixels
-  services:
-    Nixplay: 
+  sources:
+    nixplay: 
       login_url: "https://api.nixplay.com/www-login/"
       acct_name: "user"
       acct_pwd: "password"
       playlist_url: "https://api.nixplay.com/v3/playlists"
       aspect_identifier: "OLED"
-    Cropolla: 
+    cropolla: 
       api_url: "https://cropolla.com/api/a"
       api_id: "id"
       api_key: "key"        
-    GooglePhotos: 
+    google_photos: 
       media_url: "https://photoslibrary.googleapis.com/v1/mediaItems"
       acct_id: "idr"
       acct_pwd: "password" 
-    Flickr: 
+    flickr: 
       api_url: "https://api.flickr.com/services/rest/"
       api_id: "id"
       api_key: "key" 
-    ApplePhotos: 
+    apple_photos: 
       api_url: "https://photos.apple.com/api/v1/playlists"
       acct_name: "user"
       acct_pwd:  "password"  

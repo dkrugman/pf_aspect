@@ -20,8 +20,11 @@ class GetMediaError(Exception):
 class import_photos:
     """Class to import photos from third-party services to local filesystem."""
 
-    def __init__(self):
-        pass
+    def __init__(self, model) -> None:
+        logger.info("creating an instance of ImportPhotos")
+        self.__model = model
+        self.__import_sources = self.__model.get_aspect_config()["sources"]
+        print("SOURCES: " & self.__import_sources)     
 
 def get_ntp_time():
     """Gets the current time from an NTP server."""

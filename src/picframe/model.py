@@ -112,16 +112,27 @@ DEFAULT_CONFIG = {
         'enable': True,  # Set to True for Aspect frames 
         'min_rotation_interval': 30,    # minimum time in seconds between rotations
         'set_size': 10, # number of images in each orientation  
-        'width': 2894,  # width of the display in pixels
-        'height': 2160,  # height of the display in pixels
-        'Nixplay': { 'login_url': 'https://api.nixplay.com/www-login/', 'acct_name': 'user', 'acct_pwd': 'password', 'playlist_url': 'https://api.nixplay.com/v3/playlists', 'aspect_identifier': 'OLED' }, 
-        'Cropolla': { 'api_url': 'https://cropolla.com/api/a', 'api_id': 'id', 'api_key': 'key' },
-        'GooglePhotos': { 'media_url': 'https://photoslibrary.googleapis.com/v1/mediaItems', 'acct_id': 'id', 'acct_pwd': 'password' }, 
-        'Flickr': { 'api_url': 'https://api.flickr.com/services/rest/', 'api_id': 'id', 'api_key': 'key' }, 
-        'ApplePhotos': { 'playlist_url': 'https://photos.apple.com/api/v1/playlists', 'acct_name': 'user', 'acct_pwd': 'password' } 
+        'width': 2894,  # width of the visible display in pixels
+        'height': 2160,  # height of the visible display in pixels
+        'sources': {
+            'nixplay': { 'enable': True, 'login_url': 'https://api.nixplay.com/www-login/', 'acct_name': 'user', 'acct_pwd': 'password', 'playlist_url': 'https://api.nixplay.com/v3/playlists', 'aspect_identifier': 'OLED' }, 
+            'google_photos': { 'enable': False, 'media_url': 'https://photoslibrary.googleapis.com/v1/mediaItems', 'acct_id': 'id', 'acct_pwd': 'password', 'aspect_identifier': 'OLED'  }, 
+            'flickr': { 'enable': False, 'api_url': 'https://api.flickr.com/services/rest/', 'api_id': 'id', 'api_key': 'key', 'aspect_identifier': 'OLED'  }, 
+            'apple_photos': { 'enable': False, 'playlist_url': 'https://photos.apple.com/api/v1/playlists', 'acct_name': 'user', 'acct_pwd': 'password', 'aspect_identifier': 'OLED' }
+        },
+        'services': {
+            'random_org': {
+                            'enable': True, 'api_url': 'https://api.random.org/json-rpc/4/invoke', 
+                            'api_key1': '6ce1241d-4e32-4e54-8c7a-02654e36f6fc', 'key1_name': 'aspect_dev1',
+                            'api_key2': '4403e4be-5ad6-48db-bfac-5b65e57c505a', 'key2_name': 'aspect_dev2',
+                            'api_key3': '168ae04d-1044-4eb5-8af8-8e89b70847cc', 'key3_name': 'aspect_dev3',
+                            'daily_limit': 1000,  # requests per day
+                            'rate_limit ': 10     # requests per second
+            },
+            'croppola':   { 'enable': False , 'api_url': 'https://cropolla.com/api/a', 'api_id': 'id', 'api_key': 'key', 'max_crop': 0.25 }
+        }
     }
 }
-
 
 class Pic:  # TODO could this be done more elegantly with namedtuple
 

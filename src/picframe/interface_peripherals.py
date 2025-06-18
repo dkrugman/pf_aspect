@@ -13,12 +13,7 @@ class InterfacePeripherals:
         controller: Controller of picframe steering image display.
     """
 
-    def __init__(
-        self,
-        model,
-        viewer,
-        controller,
-    ) -> None:
+    def __init__(self, model, viewer, controller) -> None:
         logger.info("creating an instance of InterfacePeripherals")
 
         self.__model = model
