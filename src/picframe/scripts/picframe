@@ -29,7 +29,7 @@ IGNORE_FUNCS = {
 
 CALL_LINES = []
 CALL_MAP = {}
-CURSOR_LINE = 0 
+CURSOR_LINE = 0
 
 class StdIOTracker:        # Accounts for any lines from other loggers/output to stdout/stderr 
     def __init__(self, real_stream):
@@ -45,12 +45,13 @@ class StdIOTracker:        # Accounts for any lines from other loggers/output to
             self.real_stream.write(full_line)
             CURSOR_LINE += 1
 
-    def flush(self):
-        if self._buffer:
-            self.real_stream.write(f"{self._buffer}")
-            self._buffer = ""
-            CURSOR_LINE += 1
-        self.real_stream.flush()
+    # def flush(self):
+    #     global CURSOR_LINE
+    #     if self._buffer:
+    #         self.real_stream.write(f"{self._buffer}")
+    #         self._buffer = ""
+    #         CURSOR_LINE += 1
+    #     self.real_stream.flush()
 
 # Replace sys.stdout and sys.stderr
 sys.stdout = StdIOTracker(sys.stdout)
@@ -75,7 +76,7 @@ def trace_calls(frame, event, arg):
         caller_loc = f"{os.path.basename(caller.f_code.co_filename)}:{caller.f_lineno}" if caller else ""
         suffix_text = f"(from {caller_loc})" if caller_loc != loc_str else ""
         suffix = (f" {suffix_text}" if suffix_text else "").ljust(SUF_COL_WIDTH)
-        line = f"CALL → {fn} @ {loc}{suffix}"
+        line = f"{CURSOR_LINE:05d}: CALL → {fn} @ {loc}{suffix}"
         CALL_LINES.append(line)
         print(line + '\n', end='')  # print but don't count it - stdout will count it
         CALL_MAP[frame] = (len(CALL_LINES) - 1, time.perf_counter(), CURSOR_LINE -1)
@@ -89,16 +90,17 @@ def trace_calls(frame, event, arg):
             ret_info = f"← RET @ {ret_loc.ljust(LOC_COL_WIDTH)} ({elapsed*1000:6.2f}ms)"
             updated_line = CALL_LINES[index] + f"  {ret_info}"
             CALL_LINES[index] = updated_line
-
             lines_up = CURSOR_LINE - call_line_num
-#            print(f"\033[36m{updated_line}\033[0m" + '  ' + str(lines_up) + ' ' * 10)
-            print(f"\033[{lines_up}A", end='')           # move up
-            print('\r' + f"\033[36m{updated_line}\033[0m" + ' ' * 10)         # overwrite
-            print(f"\033[{lines_up - 1}B", end='')           # move down (back to where we were)
+            lines_down = lines_up - 1
+            print(f"\033[{lines_up}A", end='')           
+            print('\r' + f"\033[36m{updated_line}\033[0m" + ' ' * 10)
+            if lines_down:
+                print(f"\033[{lines_down}B", end='') 
             CURSOR_LINE -= 1
     return trace_calls
 
 if __name__ == '__main__':
+    print("Starting picframe with tracing...")
     sys.argv[0] = re.sub(r'(-script\.pyw|\.exe)?$', '', sys.argv[0])
     sys.settrace(trace_calls)
     sys.exit(main())
