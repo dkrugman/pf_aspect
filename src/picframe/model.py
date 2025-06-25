@@ -170,7 +170,7 @@ class Model:
 
     def __init__(self, configfile=DEFAULT_CONFIGFILE):
         logging.basicConfig(level=logging.DEBUG)
-        self.__logger = logging.getLogger("model.Model")
+        self.__logger = logging.getLogger(__name__)
         self.__config = DEFAULT_CONFIG
         self.__last_file_change = 0.0
         configfile = os.path.expanduser(configfile)

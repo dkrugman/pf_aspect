@@ -22,7 +22,7 @@ class ImportPhotos:
     """Class to import photos from third-party services to local filesystem."""
     def __init__(self, model):
         warnings.filterwarnings("ignore", category=urllib3.exceptions.InsecureRequestWarning)
-        self.__logger = logging.getLogger("import_photos.ImportPhotos")
+        self.__logger = logging.getLogger(__name__)
         self.__model = model
         self.__sources = self.__model.get_aspect_config()["sources"]
         if not self.__sources:

@@ -36,7 +36,7 @@ class Controller:
 
     """
     def __init__(self, model, viewer):
-        self.__logger = logging.getLogger("controller.Controller")
+        self.__logger = logging.getLogger(__name__)
         self.__logger.setLevel(model.get_model_config()['log_level']) # set controller logger to model level
         self.__logger.info('creating an instance of Controller')
         self.__model = model
@@ -81,9 +81,7 @@ class Controller:
         
         if self.__viewer.is_video_playing():
             self.__viewer.stop_video()
-        else:
-            self.__next_tm = 0
-            self.__force_navigate = True
+
         self.__viewer.reset_name_tm()
 
         pic = self.__model.get_next_file()
@@ -111,6 +109,8 @@ class Controller:
         fade_time = self.__model.fade_time
 
         self.__model.pause_looping = self.__viewer.is_in_transition()
+        self.__logger.info("CALLING SLIDESHOW IS RUNNING with pic: %s)",pic.fname if pic else 'None')
+        self.__logger.info("time_delay: %s, fade_time: %s, paused: %s",time_delay, fade_time, self.__paused)
         _, skip_image, video_playing = self.__viewer.slideshow_is_running(pic, time_delay, fade_time, self.__paused)
 
         if skip_image or video_playing:

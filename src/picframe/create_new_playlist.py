@@ -11,7 +11,7 @@ BATCH_LIMIT = 10000
 SHUFFLE = 1  # set to 0 to disable shuffling
 
 def __init__(self, picture_dir, db_file):
-    self.__logger = logging.getLogger("create_new_playlist.NewPlaylist")
+    self.__logger = logging.getLogger(__name__)
     self.__logger.debug('Creating an instance of NewPlaylist')
     self.picture_dir = picture_dir
     self.follow_links = follow_links

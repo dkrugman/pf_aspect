@@ -4,7 +4,7 @@ import pytest
 # pip install -e .
 from picframe.get_image_meta import GetImageMeta
 
-logger = logging.getLogger("test_get_image_data")
+logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 
