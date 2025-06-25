@@ -76,6 +76,14 @@ class AsyncTimerManager:
         except Exception as e:
             self.__logger.exception(f"Error in callback {task['name']}: {e}")
 
+    def get_time_until_next(self, name: str) -> float:
+        now = time.time()
+        for task in self._tasks:
+            if task["name"] == name:
+                elapsed = now - task["last_run"]
+                return max(0.0, task["interval"] - elapsed)
+        raise KeyError(f"No task registered with name '{name}'")
+
     def _load_last_run(self, name):
         with self._db_lock:
             cur = self._db.cursor()

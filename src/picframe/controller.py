@@ -116,9 +116,6 @@ class Controller:
         if skip_image or video_playing:
             self.__logger.debug("Skipping image or extending video playback.")
 
-
-
-
     def back(self):
         if self.__viewer.is_video_playing():
             self.__viewer.stop_video()
@@ -334,9 +331,11 @@ class Controller:
         video_extended = False
         fade_time = self.__model.fade_time
         pic = None  
+        self.__next_tm = self.__timer.get_time_until_next("slideshow")     # get time until next image using new async timer
+        self.__logger.info('next image in %s seconds', self.__next_tm)
 
         if not self.paused and tm > self.__next_tm or self.__force_navigate:
-            self.__next_tm = tm + self.__model.time_delay
+            # self.__next_tm = tm + self.__model.time_delay
             self.__force_navigate = False
             pic = self.__model.get_next_file()
             self.__logger.info('NEXT file: %s', pic.fname if pic else 'None')

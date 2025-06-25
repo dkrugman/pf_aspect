@@ -1,4 +1,5 @@
 import os, logging, time, subprocess, pi3d  #type: ignore
+from .async_timer import init_timer
 from typing import Optional, List, Tuple
 from datetime import datetime
 from PIL import Image, ImageFilter, ImageFile

@@ -11,7 +11,7 @@
 import re, sys, os, time
 from picframe.start import main
 
-TRACING = False  # Set to False to disable tracing
+TRACING = True  # Set to False to disable tracing
 FUNC_COL_WIDTH = 32
 LOC_COL_WIDTH  = 28
 SUF_COL_WIDTH  = 42
