@@ -8,12 +8,10 @@
 #
 # Note: blank lines may appear in live output, but not in trace.log file
 
-import re
-import sys
-import os
-import time
+import re, sys, os, time
 from picframe.start import main
 
+TRACING = False  # Set to False to disable tracing
 FUNC_COL_WIDTH = 32
 LOC_COL_WIDTH  = 28
 SUF_COL_WIDTH  = 42
@@ -30,19 +28,26 @@ IGNORE_FUNCS = {
 CALL_LINES = []
 CALL_MAP = {}
 CURSOR_LINE = 0
+SOURCE = ""
 
-class StdIOTracker:        # Accounts for any lines from other loggers/output to stdout/stderr 
+class StdIOTracker:               # Accounts for any lines from other loggers/output to stdout/stderr 
     def __init__(self, real_stream):
         self.real_stream = real_stream
         self._buffer = ""
 
     def write(self, text):
+        #time.sleep(.1)
+        global SOURCE
         global CURSOR_LINE
         self._buffer += text
         while '\n' in self._buffer:
             line, self._buffer = self._buffer.split('\n', 1)
-            full_line = f"{line}\n"
+            if SOURCE != "TRACE":   # If not from trace, add CURSOR_LINE to the start 
+                full_line = f"\033[33m{CURSOR_LINE:05d}: {line} \033[0m\n"  # 33m for yellow color 
+            else:
+                full_line = f"{line}\n"
             self.real_stream.write(full_line)
+            SOURCE = ""  # Reset SOURCE after writing
             CURSOR_LINE += 1
 
     # def flush(self):
@@ -58,6 +63,7 @@ sys.stdout = StdIOTracker(sys.stdout)
 sys.stderr = StdIOTracker(sys.stderr)
 
 def trace_calls(frame, event, arg):
+    global SOURCE
     global CURSOR_LINE
     code = frame.f_code
     func_name = code.co_name
@@ -72,6 +78,7 @@ def trace_calls(frame, event, arg):
     loc = loc_str.ljust(LOC_COL_WIDTH)
 
     if event == 'call':
+        SOURCE = "TRACE"
         caller = frame.f_back
         caller_loc = f"{os.path.basename(caller.f_code.co_filename)}:{caller.f_lineno}" if caller else ""
         suffix_text = f"(from {caller_loc})" if caller_loc != loc_str else ""
@@ -83,6 +90,7 @@ def trace_calls(frame, event, arg):
         return trace_calls
 
     elif event == 'return':
+        SOURCE = "TRACE"
         if frame in CALL_MAP:
             index, start_time, call_line_num = CALL_MAP.pop(frame)
             elapsed = time.perf_counter() - start_time
@@ -93,14 +101,16 @@ def trace_calls(frame, event, arg):
             lines_up = CURSOR_LINE - call_line_num
             lines_down = lines_up - 1
             print(f"\033[{lines_up}A", end='')           
-            print('\r' + f"\033[36m{updated_line}\033[0m" + ' ' * 10)
+            print('\r' + f"\033[36m{updated_line}\033[0m" + ' ' * 10)   # 36m for cyan color
             if lines_down:
                 print(f"\033[{lines_down}B", end='') 
             CURSOR_LINE -= 1
     return trace_calls
 
 if __name__ == '__main__':
-    print("Starting picframe with tracing...")
+    import asyncio
+    if TRACING:
+        print("Starting picframe with tracing...")
+        sys.settrace(trace_calls)
     sys.argv[0] = re.sub(r'(-script\.pyw|\.exe)?$', '', sys.argv[0])
-    sys.settrace(trace_calls)
-    sys.exit(main())
+    sys.exit(asyncio.run(main()))

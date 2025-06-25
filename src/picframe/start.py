@@ -1,4 +1,4 @@
-import sys, os, logging, locale, argparse
+import sys, os, logging, locale, argparse, asyncio
 from shutil import copytree
 from picframe import model, viewer_display, controller, __version__
 
@@ -73,7 +73,8 @@ def check_packages(packages):
         except ImportError:
             print(package, ': Not found!')
 
-def main():
+async def main():
+    sys.stdout.write("\x1b[?7l")                         # disable line wrapping
     logging.basicConfig(stream=sys.stdout, level=logging.WARNING, format="%(asctime)s %(levelname)s [%(pathname)s:%(lineno)d] %(message)s")
     logger = logging.getLogger("start.py")
     logger.info('-------------------> starting %s', sys.argv)
@@ -124,9 +125,13 @@ def main():
     logger.debug('-------------------> model initialized with config: %s', m.get_model_config())
     v = viewer_display.ViewerDisplay(m.get_viewer_config())
     c = controller.Controller(m, v)
-    c.start()
-    c.loop()
-    c.stop()
+    await c.start()
+    try:
+        while True:
+            await asyncio.sleep(3600)
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        c.stop()
 
 if __name__ == "__main__":
-    main()
+    import asyncio
+    asyncio.run(main())

@@ -1,6 +1,7 @@
 """Controller of picframe."""
 
 import logging, time, signal, ssl
+from .async_timer import init_timer
 
 def make_date(txt):
     dt = (txt.replace('/', ':')
@@ -42,6 +43,7 @@ class Controller:
         self.__viewer = viewer
         self.__http_config = self.__model.get_http_config()
         self.__mqtt_config = self.__model.get_mqtt_config()
+        self.__time_delay = self.__model.time_delay
         self.__paused = False
         self.__force_navigate = False
         self.__next_tm = 0
@@ -73,14 +75,50 @@ class Controller:
         if self.__mqtt_config['use_mqtt']:
             self.publish_state()
 
-    def next(self):
+    async def next(self):
+        if self.paused:
+            return
+        
         if self.__viewer.is_video_playing():
             self.__viewer.stop_video()
         else:
             self.__next_tm = 0
             self.__force_navigate = True
         self.__viewer.reset_name_tm()
-        
+
+        pic = self.__model.get_next_file()
+        if pic is None:
+            self.__logger.warning("No image found.")
+            return
+
+        self.__logger.info("ADVANCE: %s", pic.fname)
+
+        image_attr = {}
+        for key in self.__model.get_model_config()['image_attr']:
+            if key == 'PICFRAME GPS':
+                image_attr['latitude'] = pic.latitude
+                image_attr['longitude'] = pic.longitude
+            elif key == 'PICFRAME LOCATION':
+                image_attr['location'] = pic.location
+            else:
+                field_name = self.__model.EXIF_TO_FIELD[key]
+                image_attr[key] = getattr(pic, field_name, None)
+
+        if self.__mqtt_config['use_mqtt']:
+            self.publish_state(pic.fname, image_attr)
+
+        time_delay = self.__model.time_delay
+        fade_time = self.__model.fade_time
+
+        self.__model.pause_looping = self.__viewer.is_in_transition()
+        _, skip_image, video_playing = self.__viewer.slideshow_is_running(pic, time_delay, fade_time, self.__paused)
+
+        if skip_image or video_playing:
+            self.__logger.debug("Skipping image or extending video playback.")
+
+
+
+
     def back(self):
         if self.__viewer.is_video_playing():
             self.__viewer.stop_video()
@@ -289,52 +327,59 @@ class Controller:
         return pic.fname
 
     def loop(self):  # TODO exit loop gracefully and call image_cache.stop()
+     
         # catch ctrl-c
         signal.signal(signal.SIGINT, self.__signal_handler)
 
         video_extended = False
-        while self.keep_looping:
-            time_delay = self.__model.time_delay
-            fade_time = self.__model.fade_time
+        fade_time = self.__model.fade_time
+        pic = None  
 
-            tm = time.time()
-            pic = None  
-            if not self.paused and tm > self.__next_tm or self.__force_navigate:
-                self.__next_tm = tm + self.__model.time_delay
-                self.__force_navigate = False
-                pic = self.__model.get_next_file()
-                self.__logger.info('NEXT file: %s', pic.fname if pic else 'None')
-                if pic is None:
-                    self.__next_tm = 0  # skip this image file moved or otherwise not on db
-                    pic = None  # signal slideshow_is_running not to load new image
-                else:
-                    image_attr = {}
-                    for key in self.__model.get_model_config()['image_attr']:
-                        if key == 'PICFRAME GPS':
-                            image_attr['latitude'] = pic.latitude
-                            image_attr['longitude'] = pic.longitude
-                        elif key == 'PICFRAME LOCATION':
-                            image_attr['location'] = pic.location
-                        else:
-                            field_name = self.__model.EXIF_TO_FIELD[key]
-                            image_attr[key] = pic.__dict__[field_name]  # TODO nicer using namedtuple for Pic
-                    if self.__mqtt_config['use_mqtt']:
-                        self.publish_state(pic.fname, image_attr)
-            self.__model.pause_looping = self.__viewer.is_in_transition()
-            (loop_running, skip_image, video_playing) = self.__viewer.slideshow_is_running(pic, time_delay, fade_time, self.__paused)
-            if not loop_running:
-                break
-            if skip_image or (video_extended and not video_playing):
-                self.__next_tm = 0
-                video_extended = False
-            if video_playing:
-                video_extended = True
-            self.__interface_peripherals.check_input()
+        if not self.paused and tm > self.__next_tm or self.__force_navigate:
+            self.__next_tm = tm + self.__model.time_delay
+            self.__force_navigate = False
+            pic = self.__model.get_next_file()
+            self.__logger.info('NEXT file: %s', pic.fname if pic else 'None')
+            if pic is None:
+                self.__next_tm = 0  # skip this image file moved or otherwise not on db
+                pic = None  # signal slideshow_is_running not to load new image
+            else:
+                image_attr = {}
+                for key in self.__model.get_model_config()['image_attr']:
+                    if key == 'PICFRAME GPS':
+                        image_attr['latitude'] = pic.latitude
+                        image_attr['longitude'] = pic.longitude
+                    elif key == 'PICFRAME LOCATION':
+                        image_attr['location'] = pic.location
+                    else:
+                        field_name = self.__model.EXIF_TO_FIELD[key]
+                        image_attr[key] = pic.__dict__[field_name]  # TODO nicer using namedtuple for Pic
+                if self.__mqtt_config['use_mqtt']:
+                    self.publish_state(pic.fname, image_attr)
+        self.__model.pause_looping = self.__viewer.is_in_transition()
+        (loop_running, skip_image, video_playing) = self.__viewer.slideshow_is_running(pic, time_delay, fade_time, self.__paused)
+        
+        if skip_image or (video_extended and not video_playing):
+            self.__next_tm = 0
+            video_extended = False
+        if video_playing:
+            video_extended = True
+        self.__interface_peripherals.check_input()
 
-    def start(self):
+    async def start(self):
         self.__viewer.slideshow_start()
         from picframe.interface_peripherals import InterfacePeripherals
         self.__interface_peripherals = InterfacePeripherals(self.__model, self.__viewer, self)
+        
+        from picframe.import_photos import ImportPhotos
+        self.__import_photos = ImportPhotos(self.__model)
+
+        self.__timer = init_timer(self.__model)
+        self.__timer.register(self.next, interval=self.__time_delay, name='slideshow')
+       # self.__timer.register(self.import_photos.check_imports, interval=self.__import_interval, name='import')
+       # self.__timer.register(self.image_process.process_files, interval=self.__process_interval, name='process_files')
+
+        self.__timer.start()
 
         # start mqtt
         if self.__mqtt_config['use_mqtt']:

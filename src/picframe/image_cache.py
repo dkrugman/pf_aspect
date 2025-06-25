@@ -9,7 +9,7 @@ from picframe.video_streamer import VIDEO_EXTENSIONS, get_video_info
 
 class ImageCache:
 
-    EXTENSIONS = ['.png', '.jpg', '.jpeg', '.heif', '.heic']
+    EXTENSIONS = ['.png', '.jpg', '.jpeg', '.heif', '.heic', '.jxl', '.webp']
     EXIF_TO_FIELD = {'EXIF FNumber': 'f_number',
                      'Image Make': 'make',
                      'Image Model': 'model',
