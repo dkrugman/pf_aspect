@@ -148,31 +148,57 @@ peripherals:
       shortcut: "p"                       # default="p"
 
 aspect:
-  enable: True                           # default=True
-  min_rotation_interval: 30,              # minimum time in seconds between rotations
-  set_size: 10,                           # number of images in each orientation  
-  width: 2894,                            # width of the display in pixels
-  height: 2160,                           # height of the display in pixels
+  enable: True                            # default=True
+  import_dir: "~/Pictures/Imports"   # location for imported photos before processing
+  min_rotation_interval: 30               # minimum time in seconds between rotations
+  rotation_timeout: 30                    # max time before error
+  target_set_size: 10                     # target number of images in each orientation  
+  min_set_size: 3                         # minimum number of images in each orientation
+  JPEG_XL: True                           # Use JPEG XL for image processing
+  square_img: "Landscape"                 # display mode for square images, "Landscape" or "Portrait"
+  width: 2894                             # width of the display in pixels
+  height: 2160                            # height of the display in pixels
   sources:
-    nixplay: 
+    nixplay:
+      enable: True
       login_url: "https://api.nixplay.com/www-login/"
-      acct_name: "user"
-      acct_pwd: "password"
+      acct_id: ""
+      acct_pwd: ""
       playlist_url: "https://api.nixplay.com/v3/playlists"
-      aspect_identifier: "OLED"
-    cropolla: 
-      api_url: "https://cropolla.com/api/a"
-      api_id: "id"
-      api_key: "key"        
-    google_photos: 
+      identifier: "OLED"
+    google:
+      enable: False
       media_url: "https://photoslibrary.googleapis.com/v1/mediaItems"
-      acct_id: "idr"
-      acct_pwd: "password" 
-    flickr: 
+      acct_id: "id"
+      acct_pwd: "password"
+      identifier: "OLED"
+    flickr:
+      enable: False
       api_url: "https://api.flickr.com/services/rest/"
       api_id: "id"
-      api_key: "key" 
-    apple_photos: 
+      api_key: "key"
+      identifier: "OLED"
+    apple:
+      enable: False
       api_url: "https://photos.apple.com/api/v1/playlists"
-      acct_name: "user"
-      acct_pwd:  "password"  
+      acct_id: "user"
+      acct_pwd:  "password"
+      identifier: "OLED"
+  services:
+    cropolla:
+      enable: False
+      api_url: "https://cropolla.com/api/a"
+      api_id: "id"
+      api_key: "key"
+      max_crop: 0.25                      # max image loss (%)
+    random_org:
+      enable: True
+      api_url: "https://api.random.org/json-rpc/4/invoke"
+      api_key1: "6ce1241d-4e32-4e54-8c7a-02654e36f6fc"
+      key1_name: "aspect_dev"
+      api_key2: "4403e4be-5ad6-48db-bfac-5b65e57c505a"
+      key2_name: "aspect_dev2"
+      api_key3: "168ae04d-1044-4eb5-8af8-8e89b70847cc"
+      key3_name: "aspect_dev3"
+      daily_limit: 1000                   # reequsts per day
+      rate_limit: 10                      # requests per second
