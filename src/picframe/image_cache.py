@@ -29,7 +29,7 @@ class ImageCache:
         self.__modified_folders = []
         self.__modified_files = []
         self.__cached_file_stats = []  # collection shared between threads
-        self.__logger = logging.getLogger("image_cache.ImageCache")
+        self.__logger = logging.getLogger(__name__)
         self.__logger.debug('Creating an instance of ImageCache')
         self.__picture_dir = picture_dir
         self.__follow_links = follow_links

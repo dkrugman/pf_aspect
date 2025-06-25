@@ -65,7 +65,7 @@ class AsyncTimerManager:
                 if coros:
                     await asyncio.gather(*coros)
 
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(1)
         except asyncio.CancelledError:
             self.__logger.info("TimerManager cancelled.")
             self._save_all_states()

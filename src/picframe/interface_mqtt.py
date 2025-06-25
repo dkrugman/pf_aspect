@@ -52,7 +52,7 @@ class InterfaceMQTT:
         Exception:
             If MQTT setup fails.
         """
-        self.__logger = logging.getLogger("interface_mqtt.InterfaceMQTT")
+        self.__logger = logging.getLogger(__name__)
         self.__logger.debug("Creating an instance of InterfaceMQTT")
         self.__controller = controller
         self.__controller.publish_state = self.publish_state

@@ -14,7 +14,7 @@ except ImportError:
 class GetImageMeta:
 
     def __init__(self, filename):
-        self.__logger = logging.getLogger("get_image_meta.GetImageMeta")
+        self.__logger = logging.getLogger(__name__)
         self.__tags = {}
         self.__filename = filename  # in case no exif data in which case needed for size
         self.__image_width: int = 0
@@ -118,7 +118,7 @@ class GetImageMeta:
     def __do_iptc_keywords(self):
         try:
             from iptcinfo3 import IPTCInfo
-            iptcinfo_logger = logging.getLogger('iptcinfo')  # turn off useless log infos
+            iptcinfo_logger = logging.getLogger(__name__)  # turn off useless log infos
             iptcinfo_logger.setLevel(logging.ERROR)
             with open(self.__filename, 'rb') as fh:
                 iptc = IPTCInfo(fh, force=True, out_charset='utf-8')  # TODO put IPTC read in separate function
@@ -235,7 +235,7 @@ class GetImageMeta:
                 image = image.convert("RGB")
         # raise # the system should be able to withstand files being moved etc without crashing
         except Exception as e:
-            logger = logging.getLogger("get_image_meta.GetImageMeta")
+            logger = logging.getLogger(__name__)
             logger.warning("Can't open file: \"%s\"", fname)
             logger.warning("Cause: %s", e)
             image = None

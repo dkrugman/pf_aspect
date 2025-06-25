@@ -28,7 +28,7 @@ def parse_show_text(txt):
 class ViewerDisplay:
 
     def __init__(self, config):
-        self.__logger = logging.getLogger("viewer_display.ViewerDisplay")
+        self.__logger = logging.getLogger(__name__)
         self.__logger.debug('ViewerDisplay starting')
         self.__blur_amount = config['blur_amount']
         self.__blur_zoom = config['blur_zoom']

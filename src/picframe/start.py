@@ -18,7 +18,6 @@ def create_config(root):
     fullpath = os.path.join(fullpath_root, 'config')
     source = os.path.join(fullpath, 'configuration_example.yaml')
     destination = os.path.join(fullpath, 'configuration.yaml')
-    run_start = os.path.join(fullpath_root, 'run_start.py')  # TODO for work-around on RPi4
 
     try:
         with open(source, "r") as file:
@@ -53,9 +52,6 @@ def create_config(root):
 
         with open(destination, "w") as file:
             file.write(filedata)
-
-        with open(run_start, "w") as file:  # TODO work-around for RPi4
-            file.write("from picframe import start\nstart.main()\n")
     except Exception:
         raise
 
@@ -75,8 +71,8 @@ def check_packages(packages):
 
 async def main():
     sys.stdout.write("\x1b[?7l")                         # disable line wrapping
-    logging.basicConfig(stream=sys.stdout, level=logging.WARNING, format="%(asctime)s %(levelname)s [%(pathname)s:%(lineno)d] %(message)s")
-    logger = logging.getLogger("start.py")
+    logging.basicConfig(stream=sys.stdout, level=logging.DEBUG, format="%(asctime)s %(levelname)s [%(filename)s:%(lineno)d] %(message)s")
+    logger = logging.getLogger(__name__)
     logger.info('-------------------> starting %s', sys.argv)
     parser = argparse.ArgumentParser()
     group = parser.add_mutually_exclusive_group()
@@ -122,7 +118,7 @@ async def main():
     else:
         m = model.Model()
 
-    logger.debug('-------------------> model initialized with config: %s', m.get_model_config())
+    logger.info('-------------------> model initialized with config: %s', m.get_model_config())
     v = viewer_display.ViewerDisplay(m.get_viewer_config())
     c = controller.Controller(m, v)
     await c.start()

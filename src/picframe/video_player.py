@@ -32,7 +32,7 @@ class VideoPlayer:
     """
 
     def __init__(self, x: int, y: int, w: int, h: int, fit_display: bool = False) -> None:
-        self.logger = logging.getLogger("video_player")
+        self.logger = logging.getLogger(__name__)
         self.logger.debug("Initializing VideoPlayer")
         self.window: Optional[ctypes.c_void_p] = None
         self.player: Optional[vlc.MediaPlayer] = None
