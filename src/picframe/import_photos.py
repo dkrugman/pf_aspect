@@ -33,6 +33,7 @@ class ImportPhotos:
         self.__update_interval = model_config['update_interval']
         self.__import_dir = self.__model.get_aspect_config()["import_dir"]
 
+        self.__session = None
         self.__modified_folders = []
         self.__modified_files = []
         self.__cached_file_stats = []  # collection shared between threads
@@ -83,7 +84,7 @@ class ImportPhotos:
 
         return string
 
-    def get_login_session(login_url, username, password):
+    def get_login_session(self, login_url, username, password):
         try:
             session = create_authorized_client(username, password, login_url)
             # print(vars(session))
@@ -96,6 +97,7 @@ class ImportPhotos:
         except Exception as e:
             self.__logger.error(f"An error occurred: {e}")
             self.__logger.error("logged in")
+ 
 
     def create_authorized_client(username: str, password: str, login_url: str):
         """Submits login form and returns valid session."""    
@@ -108,7 +110,7 @@ class ImportPhotos:
             response = session.post(login_url, headers=headers, data=data)
         return session
     
-    def get_source_playlists(session, playlist_url, frame_key):
+    def get_playlist_sources(self, session, playlist_url, identifier):
         """Retrieves playlist names that match key and last_updated_date from external sources."""      
         if source == 'nixplay':
             source_prefix = f"{source}_"
@@ -118,14 +120,14 @@ class ImportPhotos:
             playlist_url = self.__sources[source]['playlist_url']
             identifier = self.__sources[source]['identifier']
             item_path = "slides"                # url is: playlist_url + list_id + '/' + item_path
-            session = self.__get_login_session(login_url, username, password)
+            self.__session = self.__get_login_session(login_url, username, password)
             playlist_names = self.__get_nixplay_playlists(session, playlist_url, identifier)
             for name in playlist_names:
                 self.__playlists.append(f"{source_prefix}_{name}")
         json = session.get(playlist_url).json()
         playtlists = []
         for plist in json:
-            if (re.search(frame_key + "$", plist["playlist_name"])):
+            if (re.search(identifier + "$", plist["playlist_name"])):
                 data = {
                         "id": plist["id"],
                         "playlist_name": plist["playlist_name"],
@@ -170,13 +172,13 @@ class ImportPhotos:
 # GET PLAYLIST NAMES 
     playlists = []
     try:
-        playlists = get_playlist_names(session, playlist_url, frame_key)
+        playlists = get_playlist_names(session, playlist_url, identifier)
 
     except GetPlaylistsError as e:
         print(f"Login failed: {e}")
     except Exception as e:
         print(f"An error occurred: {e}")
-    print("got playlists")
+
 
 # CHECK OR CREATE SUBDIRECTORIES
     print("checking for playlist updates")
