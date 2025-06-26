@@ -109,9 +109,9 @@ class Controller:
         fade_time = self.__model.fade_time
 
         self.__model.pause_looping = self.__viewer.is_in_transition()
-        self.__logger.info("CALLING SLIDESHOW IS RUNNING with pic: %s)",pic.fname if pic else 'None')
-        self.__logger.info("time_delay: %s, fade_time: %s, paused: %s",time_delay, fade_time, self.__paused)
-        _, skip_image, video_playing = self.__viewer.slideshow_is_running(pic, time_delay, fade_time, self.__paused)
+        self.__logger.debug("CALLING SLIDESHOW IS RUNNING with pic: %s)",pic.fname if pic else 'None')
+        self.__logger.debug("time_delay: %s, fade_time: %s, paused: %s",time_delay, fade_time, self.__paused)
+        _, skip_image, video_playing = self.__viewer.slideshow_transition(pic, time_delay, fade_time, self.__paused)
 
         if skip_image or video_playing:
             self.__logger.debug("Skipping image or extending video playback.")
@@ -341,7 +341,7 @@ class Controller:
             self.__logger.info('NEXT file: %s', pic.fname if pic else 'None')
             if pic is None:
                 self.__next_tm = 0  # skip this image file moved or otherwise not on db
-                pic = None  # signal slideshow_is_running not to load new image
+                pic = None  # signal slideshow_transition not to load new image
             else:
                 image_attr = {}
                 for key in self.__model.get_model_config()['image_attr']:
@@ -356,7 +356,7 @@ class Controller:
                 if self.__mqtt_config['use_mqtt']:
                     self.publish_state(pic.fname, image_attr)
         self.__model.pause_looping = self.__viewer.is_in_transition()
-        (loop_running, skip_image, video_playing) = self.__viewer.slideshow_is_running(pic, time_delay, fade_time, self.__paused)
+        (loop_running, skip_image, video_playing) = self.__viewer.slideshow_transition(pic, time_delay, fade_time, self.__paused)
         
         if skip_image or (video_extended and not video_playing):
             self.__next_tm = 0

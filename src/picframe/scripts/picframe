@@ -19,7 +19,7 @@ SUF_COL_WIDTH  = 42
 FILTER_PATH = "/home/pi/src/picframe/src/picframe"
 IGNORE_FUNCS = {
     'paused', 'is_video_playing', '__draw_overlay', 'clock_is_on',
-    'slideshow_is_running', '__update_pointer_position',
+    'slideshow_transition', '__update_pointer_position',
     '__pointer_moved', '__handle_touch_input',
     'menu_is_on', 'check_input', '<genexpr>', 'EXIF_TO_FIELD'
 }

@@ -71,9 +71,9 @@ def check_packages(packages):
 
 async def main():
     sys.stdout.write("\x1b[?7l")                         # disable line wrapping
-    logging.basicConfig(stream=sys.stdout, level=logging.DEBUG, format="%(asctime)s %(levelname)s [%(filename)s:%(lineno)d] %(message)s")
+    logging.basicConfig(stream=sys.stdout, level=logging.INFO, format="%(asctime)s %(levelname)s [%(filename)s:%(lineno)d] %(message)s")
     logger = logging.getLogger(__name__)
-    logger.info('-------------------> starting %s', sys.argv)
+    logger.info('starting %s', sys.argv)
     parser = argparse.ArgumentParser()
     group = parser.add_mutually_exclusive_group()
     group.add_argument("-i", "--initialize",
