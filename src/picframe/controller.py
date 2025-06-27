@@ -1,16 +1,22 @@
-"""Controller of picframe."""
+"""
+Controller of picframe.
 
-import logging, time, signal, ssl
+Controls image display, manages state, handles MQTT and HTTP interfaces.
+"""
+
+import logging
+import time
+import signal
+import ssl
 from .async_timer import init_timer
+from datetime import datetime
 
 def make_date(txt):
-    dt = (txt.replace('/', ':')
-          .replace('-', ':')
-          .replace(',', ':')
-          .replace('.', ':')
-          .split(':'))
-    dt_tuple = tuple(int(i) for i in dt)                                    # TODO catch badly formed dates?
-    return time.mktime(dt_tuple + (0, 0, 0, 0, 0, 0))
+    try:
+        return datetime.strptime(txt, "%Y/%m/%d").timestamp()
+    except ValueError:
+        # fallback or re-raise with meaningful error
+        raise ValueError(f"Invalid date format: {txt}")
 
 class Controller:
     """Controller of picframe.
@@ -370,7 +376,13 @@ class Controller:
         from picframe import import_photos
         self._import_photos = import_photos.ImportPhotos(self.__model)
 
-        await self._import_photos.check_for_updates()                       # Ensure import_photos runs once immediately
+        async def import_wrapper(self):
+            try:
+                await self._import_photos.check_for_updates()
+            except Exception as e:
+                self.__logger.exception(f"Import task failed: {e}")
+
+        self._import_task = asyncio.create_task(self.import_wrapper())      # Ensure import_photos runs once immediately
 
         self.__timer = init_timer(self.__model)
         self.__timer.register(self.next, interval=self.__time_delay, name='slideshow')
@@ -424,5 +436,4 @@ class Controller:
             self.__logger.info('Ctrl-c pressed, stopping picframe...')
         else:
             self.__logger.warning('Signal %s received, stopping picframe...', sig)
-        print('You pressed Ctrl-c!')
         self.keep_looping = False
