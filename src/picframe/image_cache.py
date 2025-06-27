@@ -5,7 +5,7 @@ import logging
 import threading
 from picframe import get_image_meta
 from picframe.video_streamer import VIDEO_EXTENSIONS, get_video_info
-
+from picframe.image_meta_utils import get_exif_info
 
 class ImageCache:
 
@@ -440,57 +440,6 @@ class ImageCache:
                 self.__db.executemany('DELETE FROM file WHERE file_id = ?', file_id_list)
                 self.__db_write_lock.release()
             self.__purge_files = False
-
-    def __get_exif_info(self, file_path_name):
-        exifs = get_image_meta.GetImageMeta(file_path_name)
-        # Dict to store interesting EXIF data
-        # Note, the 'key' must match a field in the 'meta' table
-        e = {}
-
-        e['orientation'] = exifs.get_orientation()
-
-        width, height = exifs.size
-        ext = os.path.splitext(file_path_name)[1].lower()
-        if ext not in ('.heif', '.heic') and e['orientation'] in (5, 6, 7, 8):
-            width, height = height, width  # swap values
-        e['width'] = width
-        e['height'] = height
-
-        e['f_number'] = exifs.get_exif('EXIF FNumber')
-        e['make'] = exifs.get_exif('Image Make')
-        e['model'] = exifs.get_exif('Image Model')
-        e['exposure_time'] = exifs.get_exif('EXIF ExposureTime')
-        e['iso'] = exifs.get_exif('EXIF ISOSpeedRatings')
-        e['focal_length'] = exifs.get_exif('EXIF FocalLength')
-        e['rating'] = exifs.get_exif('Image Rating')
-        e['lens'] = exifs.get_exif('EXIF LensModel')
-        e['exif_datetime'] = None
-        val = exifs.get_exif('EXIF DateTimeOriginal')
-        if val is not None:
-            # Remove any subsecond portion of the DateTimeOriginal value. According to the spec, it's
-            # not valid here anyway (should be in SubSecTimeOriginal), but it does exist sometimes.
-            val = val.split('.', 1)[0]
-            try:
-                e['exif_datetime'] = time.mktime(time.strptime(val, '%Y:%m:%d %H:%M:%S'))
-            except Exception:
-                pass
-
-        # If we still don't have a date/time, just use the file's modificaiton time
-        if e['exif_datetime'] is None:
-            e['exif_datetime'] = os.path.getmtime(file_path_name)
-
-        gps = exifs.get_location()
-        lat = gps['latitude']
-        lon = gps['longitude']
-        e['latitude'] = round(lat, 4) if lat is not None else lat  # TODO sqlite requires (None,) to insert NULL
-        e['longitude'] = round(lon, 4) if lon is not None else lon
-
-        # IPTC
-        e['tags'] = exifs.get_exif('IPTC Keywords')
-        e['title'] = exifs.get_exif('IPTC Object Name')
-        e['caption'] = exifs.get_exif('IPTC Caption/Abstract')
-
-        return e
 
     def __get_video_info(self, file_path_name: str) -> dict:
         """

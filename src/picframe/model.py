@@ -59,8 +59,8 @@ DEFAULT_CONFIG = {
         'subdirectory': '',
         'recent_n': 3,
         'reshuffle_num': 1,
-        'time_delay': 200.0,
-        'fade_time': 10.0,
+        'time_delay': 20.0,
+        'fade_time': 5.0,
         'shuffle': True,
         'sort_cols': 'fname ASC',
         'image_attr': ['PICFRAME GPS'],                  # image attributes send by MQTT, Keys are taken from exifread library, 'PICFRAME GPS' is special to retrieve GPS lon/lat # noqa: E501
@@ -111,6 +111,8 @@ DEFAULT_CONFIG = {
     'aspect': {
         'enable': True,                                  # Set to True for Aspect frames 
         'import_dir': '~/picframe_data/imports',         # location for imported photos before processing
+        'import_interval': 900,                          # secsonds between checks for updates from cloud default: 900 (15 min)
+        'process_interval': 300,                         # secsonds between checks for files to process defsult: 300 (5 min)
         'min_rotation_interval': 30,                     # minimum time in seconds between rotations
         'set_size': 10,                                  # number of images in each orientation  
         'width': 2894,                                   # width of the visible display in pixels
@@ -235,6 +237,8 @@ class Model:
         if aspect_config['enable']:
             self.__logger.info("Aspect mode enabled")
             self.__aspect_enabled = True
+            self.__import_interval = aspect_config['import_interval']
+            self.__process_interval = aspect_config['process_interval']
             self.__min_rotation_interval = aspect_config['min_rotation_interval']
             self.__set_size = aspect_config['set_size']
             self.__width = aspect_config['width']
@@ -242,11 +246,6 @@ class Model:
             self.__import_dir = os.path.expanduser(aspect_config['import_dir'])
             self.__import_sources = aspect_config['sources']
             self.__import_services = aspect_config['services']
-
-        
-
-
-
         
 
     def get_viewer_config(self):

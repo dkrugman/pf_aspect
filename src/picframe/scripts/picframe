@@ -1,17 +1,24 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-# Logs all function calls and returns dynamically, in the order called
-# with the complete call->return line replacing the original call line
-# by moving cursor up, replacing the original line, and then back down
-# to continue logging.
-#
-# Note: blank lines may appear in live output, but not in trace.log file
+"""
+Dynamic function call tracer for Picframe.
 
-import re, sys, os, time
+Logs all function calls and returns dynamically in execution order.
+Replaces each call line with a call→return line in real time by moving
+the cursor up, overwriting the original line, and returning the cursor
+to continue logging. Blank lines may appear in live output, but not
+in trace.log.
+
+Usage:
+    Set TRACING = True to enable tracing.
+"""
+
+import re, sys, os, time, asyncio
 from picframe.start import main
 
-TRACING = True  # Set to False to disable tracing
+
+TRACING = False  # Set to False to disable tracing
 FUNC_COL_WIDTH = 32
 LOC_COL_WIDTH  = 28
 SUF_COL_WIDTH  = 42
@@ -49,13 +56,10 @@ class StdIOTracker:               # Accounts for any lines from other loggers/ou
             SOURCE = ""  # Reset SOURCE after writing
             CURSOR_LINE += 1
 
-    # def flush(self):
-    #     global CURSOR_LINE
-    #     if self._buffer:
-    #         self.real_stream.write(f"{self._buffer}")
-    #         self._buffer = ""
-    #         CURSOR_LINE += 1
-    #     self.real_stream.flush()
+    def flush(self):
+        if self._buffer:
+            self.write('\n')
+        self.real_stream.flush()
 
 # Replace sys.stdout and sys.stderr
 sys.stdout = StdIOTracker(sys.stdout)
@@ -107,7 +111,6 @@ def trace_calls(frame, event, arg):
     return trace_calls
 
 if __name__ == '__main__':
-    import asyncio
     if TRACING:
         print("Starting picframe with tracing...")
         sys.settrace(trace_calls)

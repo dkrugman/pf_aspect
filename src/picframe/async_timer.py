@@ -1,12 +1,32 @@
-import asyncio, time, logging, sqlite3, threading
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+AsyncTimerManager
+
+Provides an async timer manager to schedule and persist periodic tasks using SQLite.
+Ensures tasks run at specified intervals, even across restarts.
+
+Usage:
+    from async_timer import init_timer
+    timer = init_timer(model)
+    timer.register(my_async_func, 3600, "hourly_task")
+    timer.start()
+"""
+
+import asyncio
+import time
+import logging
+import sqlite3
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Callable, Awaitable, Optional
 
 class AsyncTimerManager:
     def __init__(self, model):
         self.__logger = logging.getLogger(__name__)
         self.__model = model
-        self.__db_file = self.__model.get_model_config()['db_file']
         self.__db_file = str(Path(self.__model.get_model_config()['db_file']).expanduser().resolve())
         self.__logger.debug(f"Using database file: {self.__db_file}")
         self._tasks = []
@@ -22,7 +42,7 @@ class AsyncTimerManager:
             """)
             self._db.commit()
         
-    def register(self, callback, interval: float, name: str):
+    def register(self, callback: Callable[[], Awaitable[None]], interval: float, name: str) -> None:
         """Register an async function with interval (sec) and a unique name."""
         if not asyncio.iscoroutinefunction(callback):
             raise TypeError("Callback must be an async function")
@@ -60,7 +80,7 @@ class AsyncTimerManager:
                         self.__logger.debug(f"Scheduling: {task['name']}")
                         task["last_run"] = now
                         self._save_last_run(task["name"], now)
-                        coros.append(self._safe_execute(task))
+                        coros.append(self._run_task(task))
 
                 if coros:
                     await asyncio.gather(*coros)
@@ -70,7 +90,7 @@ class AsyncTimerManager:
             self.__logger.info("TimerManager cancelled.")
             self._save_all_states()
 
-    async def _safe_execute(self, task):
+    async def _run_task(self, task):
         try:
             await task["callback"]()
         except Exception as e:
@@ -84,7 +104,7 @@ class AsyncTimerManager:
                 return max(0.0, task["interval"] - elapsed)
         raise KeyError(f"No task registered with name '{name}'")
 
-    def _load_last_run(self, name):
+    def _load_last_run(self, name: str) -> Optional[float]: 
         with self._db_lock:
             cur = self._db.cursor()
             cur.execute("SELECT last_run FROM timer_state WHERE name = ?", (name,))
@@ -103,7 +123,7 @@ class AsyncTimerManager:
         for task in self._tasks:
             self._save_last_run(task["name"], task["last_run"])
 
-# Singleton instance of AsyncTimerManager
+# Singleton instance of AsyncTimerManager, use init_timer(model) to instantiate.
 timer = None
 
 def init_timer(model):
