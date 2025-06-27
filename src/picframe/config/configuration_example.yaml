@@ -149,7 +149,9 @@ peripherals:
 
 aspect:
   enable: True                            # default=True
-  import_dir: "~/Pictures/Imports"   # location for imported photos before processing
+  import_dir: "~/Pictures/Imports"        # location for imported photos before processing
+  import_interval: 900                    # secsonds between checks for updates from cloud default: 900 (15 min)
+  process_interval: 300                   # secsonds between checks for files to process defsult: 300 (5 min)
   min_rotation_interval: 30               # minimum time in seconds between rotations
   rotation_timeout: 30                    # max time before error
   target_set_size: 10                     # target number of images in each orientation  

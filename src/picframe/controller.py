@@ -9,7 +9,7 @@ def make_date(txt):
           .replace(',', ':')
           .replace('.', ':')
           .split(':'))
-    dt_tuple = tuple(int(i) for i in dt)  # TODO catch badly formed dates?
+    dt_tuple = tuple(int(i) for i in dt)                                    # TODO catch badly formed dates?
     return time.mktime(dt_tuple + (0, 0, 0, 0, 0, 0))
 
 class Controller:
@@ -37,17 +37,18 @@ class Controller:
     """
     def __init__(self, model, viewer):
         self.__logger = logging.getLogger(__name__)
-        self.__logger.setLevel(model.get_model_config()['log_level']) # set controller logger to model level
+        self.__logger.setLevel(model.get_model_config()['log_level'])       # set controller logger to model level
         self.__logger.info('creating an instance of Controller')
         self.__model = model
         self.__viewer = viewer
         self.__http_config = self.__model.get_http_config()
         self.__mqtt_config = self.__model.get_mqtt_config()
         self.__time_delay = self.__model.time_delay
+        self.__import_interval = self.__model.get_aspect_config()['import_interval']
         self.__paused = False
         self.__force_navigate = False
         self.__next_tm = 0
-        self.__date_from = make_date('1901/12/15')  # TODO This seems to be the minimum date to be handled by date functions  # noqa: E501
+        self.__date_from = make_date('1901/12/15')                          # TODO This seems to be the minimum date to be handled by date functions  # noqa: E501
         self.__date_to = make_date('2038/1/1')
         self.__where_clauses = {}
         self.__sort_clause = "exif_datetime ASC"
@@ -111,12 +112,13 @@ class Controller:
         self.__model.pause_looping = self.__viewer.is_in_transition()
         self.__logger.debug("CALLING SLIDESHOW IS RUNNING with pic: %s)",pic.fname if pic else 'None')
         self.__logger.debug("time_delay: %s, fade_time: %s, paused: %s",time_delay, fade_time, self.__paused)
+        # NOTE: transition loop is blocking (this is intentional)
         _, skip_image, video_playing = self.__viewer.slideshow_transition(pic, time_delay, fade_time, self.__paused)
 
         if skip_image or video_playing:
             self.__logger.debug("Skipping image or extending video playback.")
 
-    def back(self):
+    async def back(self):
         if self.__viewer.is_video_playing():
             self.__viewer.stop_video()
         else:
@@ -131,10 +133,10 @@ class Controller:
         else:
             self.__next_tm = 0
         self.__model.delete_file()
-        self.next()  # TODO check needed to avoid skipping one as record has been deleted from model.__file_list
+        self.next()                                                         # TODO check needed to avoid skipping one as record has been deleted from model.__file_list
 
     def set_show_text(self, txt_key=None, val="ON"):
-        if val is True:  # allow to be called with boolean from httpserver
+        if val is True:                                                     # allow to be called with boolean from httpserver
             val = "ON"
         self.__viewer.set_show_text(txt_key, val)
         if pic is not None:
@@ -173,8 +175,7 @@ class Controller:
         if len(val) > 0:
             self.__model.set_where_clause('date_from', "exif_datetime > {:.0f}".format(self.__date_from))
         else:
-            # remove from where_clause
-            self.__model.set_where_clause('date_from')
+            self.__model.set_where_clause('date_from')                      # remove from where_clause
         self.__model.force_reload()
         if self.__viewer.is_video_playing():
             self.__viewer.stop_video()
@@ -194,7 +195,7 @@ class Controller:
         if len(val) > 0:
             self.__model.set_where_clause('date_to', "exif_datetime < {:.0f}".format(self.__date_to))
         else:
-            self.__model.set_where_clause('date_to')  # remove from where_clause
+            self.__model.set_where_clause('date_to')                        # remove from where_clause
         self.__model.force_reload()
         if self.__viewer.is_video_playing():
             self.__viewer.stop_video()
@@ -253,9 +254,8 @@ class Controller:
 
     @time_delay.setter
     def time_delay(self, time):
-        time = float(time)  # convert string before comparison
-        # might break it if too quick
-        if time < 5.0:
+        time = float(time)                                                  # convert string before comparison
+        if time < 5.0:                                                      # might break it if too quick
             time = 5.0
         self.__model.time_delay = time
         if self.__viewer.is_video_playing():
@@ -323,15 +323,12 @@ class Controller:
         (pic, _) = self.__model.get_current_pic()
         return pic.fname
 
-    def loop(self):  # TODO exit loop gracefully and call image_cache.stop()
-     
-        # catch ctrl-c
-        signal.signal(signal.SIGINT, self.__signal_handler)
-
+    def loop(self):                                                         # TODO exit loop gracefully and call image_cache.stop()
+        signal.signal(signal.SIGINT, self.__signal_handler)                 # catch ctrl-c
         video_extended = False
         fade_time = self.__model.fade_time
         pic = None  
-        self.__next_tm = self.__timer.get_time_until_next("slideshow")     # get time until next image using new async timer
+        self.__next_tm = self.__timer.get_time_until_next("slideshow")      # get time until next image using new async timer
         self.__logger.info('next image in %s seconds', self.__next_tm)
 
         if not self.paused and tm > self.__next_tm or self.__force_navigate:
@@ -340,8 +337,8 @@ class Controller:
             pic = self.__model.get_next_file()
             self.__logger.info('NEXT file: %s', pic.fname if pic else 'None')
             if pic is None:
-                self.__next_tm = 0  # skip this image file moved or otherwise not on db
-                pic = None  # signal slideshow_transition not to load new image
+                self.__next_tm = 0                                           # skip this image file moved or otherwise not on db
+                pic = None                                                   # signal slideshow_transition not to load new image
             else:
                 image_attr = {}
                 for key in self.__model.get_model_config()['image_attr']:
@@ -352,7 +349,7 @@ class Controller:
                         image_attr['location'] = pic.location
                     else:
                         field_name = self.__model.EXIF_TO_FIELD[key]
-                        image_attr[key] = pic.__dict__[field_name]  # TODO nicer using namedtuple for Pic
+                        image_attr[key] = pic.__dict__[field_name]           # TODO nicer using namedtuple for Pic
                 if self.__mqtt_config['use_mqtt']:
                     self.publish_state(pic.fname, image_attr)
         self.__model.pause_looping = self.__viewer.is_in_transition()
@@ -370,12 +367,14 @@ class Controller:
         from picframe.interface_peripherals import InterfacePeripherals
         self.__interface_peripherals = InterfacePeripherals(self.__model, self.__viewer, self)
         
-        from picframe.import_photos import ImportPhotos
-        self.__import_photos = ImportPhotos(self.__model)
+        from picframe import import_photos
+        self._import_photos = import_photos.ImportPhotos(self.__model)
+
+        await self._import_photos.check_for_updates()                       # Ensure import_photos runs once immediately
 
         self.__timer = init_timer(self.__model)
         self.__timer.register(self.next, interval=self.__time_delay, name='slideshow')
-       # self.__timer.register(self.import_photos.check_imports, interval=self.__import_interval, name='import')
+        self.__timer.register(self._import_photos.check_for_updates, interval=self.__import_interval, name='import')
        # self.__timer.register(self.image_process.process_files, interval=self.__process_interval, name='process_files')
 
         self.__timer.start()
@@ -402,7 +401,7 @@ class Controller:
                                                                     self.__http_config['auth'],
                                                                     self.__http_config['username'],
                                                                     self.__http_config['password'],
-                                                                )  # TODO: Implement TLS
+                                                                )           # TODO: Implement TLS
             if self.__http_config['use_ssl']:
                 self.__interface_http.socket = ssl.wrap_socket(
                                                 self.__interface_http.socket,
@@ -417,8 +416,8 @@ class Controller:
             self.__interface_mqtt.stop()
         if self.__interface_http:
             self.__interface_http.stop()
-        self.__model.stop_image_cache()  # close db tidily (blocks till closed)
-        self.__viewer.slideshow_stop()  # do this last
+        self.__model.stop_image_cache()                                     # close db tidily (blocks till closed)
+        self.__viewer.slideshow_stop()                                      # do this last
 
     def __signal_handler(self, sig, frame):
         if sig == signal.SIGINT:
