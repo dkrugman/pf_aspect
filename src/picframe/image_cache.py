@@ -6,6 +6,7 @@ import threading
 from picframe import get_image_meta
 from picframe.video_streamer import VIDEO_EXTENSIONS, get_video_info
 from picframe.image_meta_utils import get_exif_info
+from picframe import schema  # NEW: import schema module
 
 class ImageCache:
 
@@ -24,8 +25,6 @@ class ImageCache:
                      'IPTC Object Name': 'title'}
 
     def __init__(self, picture_dir, follow_links, db_file, geo_reverse, update_interval):
-        # TODO these class methods will crash if Model attempts to instantiate this using a
-        # different version from the latest one - should this argument be taken out?
         self.__modified_folders = []
         self.__modified_files = []
         self.__cached_file_stats = []  # collection shared between threads
@@ -36,10 +35,13 @@ class ImageCache:
         self.__db_file = db_file
         self.__geo_reverse = geo_reverse
         self.__update_interval = update_interval
-        self.__db = self.__create_open_db(self.__db_file)
-        self.__db_write_lock = threading.Lock()  # lock to serialize db writes between threads
-        # NB this is where the required schema is set
-        self.__update_schema(3)
+
+        # Create DB and schema externally for clarity
+        self.__db = sqlite3.connect(self.__db_file, check_same_thread=False)
+        self.__db.row_factory = sqlite3.Row
+        schema.create_schema(self.__db)
+
+        self.__db_write_lock = threading.Lock()
 
         self.__keep_looping = True
         self.__pause_looping = False
@@ -61,7 +63,7 @@ class ImageCache:
         self.__db.close()
         self.__shutdown_completed = True
 
-    def pause_looping(self, value):
+    def pause_looping(self, value: bool) -> None:
         self.__pause_looping = value
 
     def stop(self):
@@ -106,7 +108,7 @@ class ImageCache:
         self.__db.commit()
         self.__db_write_lock.release()
 
-    def query_cache(self, where_clause, sort_clause='fname ASC'):
+    def query_cache(self, where_clause: str, sort_clause: str = 'fname ASC') -> list:
         cursor = self.__db.cursor()
         cursor.row_factory = None  # we don't want the "sqlite3.Row" setting from the db here...
         try:
@@ -127,7 +129,7 @@ class ImageCache:
                 self.__insert_file(row['fname'], file_id)
                 row = self.__db.execute(sql).fetchone()  # description inserted in table
         except OSError:
-            self.__logger.warning("Image '%s' does not exists or is inaccessible", row['fname'])
+            self.__logger.warning("Image '%s' does not exist or is inaccessible", row['fname'])
         if row is not None and row['latitude'] is not None and row['longitude'] is not None and row['location'] is None:
             if self.__get_geo_location(row['latitude'], row['longitude']):
                 row = self.__db.execute(sql).fetchone()  # description inserted in table
@@ -164,159 +166,6 @@ class ImageCache:
                 'Update location: Wait for db %d ms and need %d ms for update ',
                 waittime - starttime, now - waittime)
             return True
-
-    def __create_open_db(self, db_file):
-        sql_folder_table = """
-            CREATE TABLE IF NOT EXISTS folder (
-                folder_id INTEGER NOT NULL PRIMARY KEY,
-                name TEXT UNIQUE NOT NULL,
-                last_modified REAL DEFAULT 0 NOT NULL
-            )"""
-
-        sql_file_table = """
-            CREATE TABLE IF NOT EXISTS file (
-                file_id INTEGER NOT NULL PRIMARY KEY,
-                folder_id INTEGER NOT NULL,
-                basename  TEXT NOT NULL,
-                extension TEXT NOT NULL,
-                last_modified REAL DEFAULT 0 NOT NULL,
-                UNIQUE(folder_id, basename, extension)
-            )"""
-
-        sql_meta_table = """
-            CREATE TABLE IF NOT EXISTS meta (
-                file_id INTEGER NOT NULL PRIMARY KEY,
-                orientation INTEGER DEFAULT 1 NOT NULL,
-                exif_datetime REAL DEFAULT 0 NOT NULL,
-                f_number REAL DEFAULT 0 NOT NULL,
-                exposure_time TEXT,
-                iso REAL DEFAULT 0 NOT NULL,
-                focal_length TEXT,
-                make TEXT,
-                model TEXT,
-                lens TEXT,
-                rating INTEGER,
-                latitude REAL,
-                longitude REAL,
-                width INTEGER DEFAULT 0 NOT NULL,
-                height INTEGER DEFAULT 0 NOT NULL,
-                title TEXT,
-                caption TEXT,
-                tags TEXT
-            )"""
-
-        sql_meta_index = """
-            CREATE INDEX IF NOT EXISTS exif_datetime ON meta (exif_datetime)"""
-
-        sql_location_table = """
-            CREATE TABLE IF NOT EXISTS location (
-                id INTEGER NOT NULL PRIMARY KEY,
-                latitude REAL,
-                longitude REAL,
-                description TEXT,
-                UNIQUE (latitude, longitude)
-            )"""
-
-        sql_db_info_table = """
-            CREATE TABLE IF NOT EXISTS db_info (
-                schema_version INTEGER NOT NULL
-            )"""
-
-        # Combine all important data in a single view for easy accesss
-        # Although we can't control the layout of the view when using 'meta.*', we want it
-        # all and that seems better than enumerating (and maintaining) each column here.
-        sql_all_data_view = """
-            CREATE VIEW IF NOT EXISTS all_data
-            AS
-            SELECT
-                folder.name || "/" || file.basename || "." || file.extension AS fname,
-                file.last_modified,
-                meta.*,
-                meta.height > meta.width as is_portrait,
-                location.description as location
-            FROM file
-                INNER JOIN folder
-                    ON folder.folder_id = file.folder_id
-                LEFT JOIN meta
-                    ON file.file_id = meta.file_id
-                LEFT JOIN location
-                    ON location.latitude = meta.latitude AND location.longitude = meta.longitude
-            """
-
-        # trigger to automatically delete file records when associated folder records are deleted
-        sql_clean_file_trigger = """
-            CREATE TRIGGER IF NOT EXISTS Clean_File_Trigger
-            AFTER DELETE ON folder
-            FOR EACH ROW
-            BEGIN
-                DELETE FROM file WHERE folder_id = OLD.folder_id;
-            END"""
-
-        # trigger to automatically delete meta records when associated file records are deleted
-        sql_clean_meta_trigger = """
-            CREATE TRIGGER IF NOT EXISTS Clean_Meta_Trigger
-            AFTER DELETE ON file
-            FOR EACH ROW
-            BEGIN
-                DELETE FROM meta WHERE file_id = OLD.file_id;
-            END"""
-
-        db = sqlite3.connect(db_file, check_same_thread=False)
-        db.row_factory = sqlite3.Row  # make results accessible by field name
-        for item in (sql_folder_table, sql_file_table, sql_meta_table, sql_location_table, sql_meta_index,
-                     sql_all_data_view, sql_db_info_table, sql_clean_file_trigger, sql_clean_meta_trigger):
-            db.execute(item)
-
-        return db
-
-    def __update_schema(self, required_db_schema_version):
-        sql_select = "SELECT schema_version from db_info"
-        schema_version = self.__db.execute(sql_select).fetchone()
-        schema_version = 1 if not schema_version else schema_version[0]
-
-        # DB is newer than the application. The User needs to upgrade...
-        if schema_version > required_db_schema_version:
-            raise ValueError("Database schema is newer than the application. Update the application.")
-
-        # Here, we need to update the db schema as necessary
-        if schema_version < required_db_schema_version:
-
-            if schema_version <= 1:
-                # Migrate to db schema v2
-                # Update the all_data view to only contain files from folders that currently exist.
-                # This allows stored data to be retained for files in folders that may be temporarily
-                #   missing while not causing issues for the slideshow.
-                self.__db.execute("DROP VIEW all_data")
-                self.__db.execute("ALTER TABLE folder ADD COLUMN missing INTEGER DEFAULT 0 NOT NULL")
-                self.__db.execute("""
-                    CREATE VIEW IF NOT EXISTS all_data
-                    AS
-                    SELECT
-                        folder.name || "/" || file.basename || "." || file.extension AS fname,
-                        file.last_modified,
-                        meta.*,
-                        meta.height > meta.width as is_portrait,
-                        location.description as location
-                    FROM file
-                        INNER JOIN folder
-                            ON folder.folder_id = file.folder_id
-                        LEFT JOIN meta
-                            ON file.file_id = meta.file_id
-                        LEFT JOIN location
-                            ON location.latitude = meta.latitude AND location.longitude = meta.longitude
-                    WHERE folder.missing = 0
-                    """)
-
-            if schema_version <= 2:
-                # Migrate to db schema v3
-                # Add "displayed statistics" fields to the file table (useful for slideshow debugging)
-                self.__db.execute("ALTER TABLE file ADD COLUMN displayed_count INTEGER default 0 NOT NULL")
-                self.__db.execute("ALTER TABLE file ADD COLUMN last_displayed REAL DEFAULT 0 NOT NULL")
-
-            # Finally, update the db's schema version stamp to the app's requested version
-            self.__db.execute('DELETE FROM db_info')
-            self.__db.execute('INSERT INTO db_info VALUES(?)', (required_db_schema_version,))
-            self.__db.commit()
 
     # --- Returns a set of folders matching any of
     #     - Found on disk, but not currently in the 'folder' table
@@ -493,7 +342,6 @@ class ImageCache:
         e['caption'] = getattr(meta, 'caption', None)
 
         return e
-
 
 # If being executed (instead of imported), kick it off...
 if __name__ == "__main__":
