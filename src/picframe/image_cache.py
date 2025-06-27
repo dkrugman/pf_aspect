@@ -6,7 +6,7 @@ import threading
 from picframe import get_image_meta
 from picframe.video_streamer import VIDEO_EXTENSIONS, get_video_info
 from picframe.image_meta_utils import get_exif_info
-from picframe import schema  # NEW: import schema module
+import picframe.schema as schema  # adjust import path as needed
 
 class ImageCache:
 
@@ -25,24 +25,26 @@ class ImageCache:
                      'IPTC Object Name': 'title'}
 
     def __init__(self, picture_dir, follow_links, db_file, geo_reverse, update_interval):
-        self.__modified_folders = []
-        self.__modified_files = []
-        self.__cached_file_stats = []  # collection shared between threads
         self.__logger = logging.getLogger(__name__)
         self.__logger.debug('Creating an instance of ImageCache')
+
         self.__picture_dir = picture_dir
         self.__follow_links = follow_links
         self.__db_file = db_file
         self.__geo_reverse = geo_reverse
         self.__update_interval = update_interval
 
-        # Create DB and schema externally for clarity
         self.__db = sqlite3.connect(self.__db_file, check_same_thread=False)
         self.__db.row_factory = sqlite3.Row
-        schema.create_schema(self.__db)
+
+        if not self.__schema_exists_and_valid():
+            schema.create_schema(self.__db)
 
         self.__db_write_lock = threading.Lock()
 
+        self.__modified_folders = []
+        self.__modified_files = []
+        self.__cached_file_stats = []
         self.__keep_looping = True
         self.__pause_looping = False
         self.__shutdown_completed = False
@@ -51,69 +53,79 @@ class ImageCache:
         t = threading.Thread(target=self.__loop)
         t.start()
 
+    def __schema_exists_and_valid(self):
+        """Check if db_info table exists and has a valid schema version."""
+        try:
+            cur = self.__db.cursor()
+            cur.execute("""
+                SELECT name FROM sqlite_master
+                WHERE type='table' AND name='db_info'
+            """)
+            if cur.fetchone() is None:
+                return False  # db_info table does not exist
+
+            cur.execute("SELECT schema_version FROM db_info")
+            row = cur.fetchone()
+            if row and row[0] >= schema.REQUIRED_SCHEMA_VERSION:
+                return True
+            else:
+                return False  # outdated or missing version
+
+        except sqlite3.Error as e:
+            self.__logger.warning(f"Schema check failed: {e}")
+            return False
+
     def __loop(self):
         while self.__keep_looping:
             if not self.__pause_looping:
                 self.update_cache()
                 time.sleep(self.__update_interval)
             time.sleep(0.01)
-        self.__db_write_lock.acquire()
-        self.__db.commit()  # close after update_cache finished for last time
-        self.__db_write_lock.release()
-        self.__db.close()
+        with self.__db_write_lock:
+            self.__db.commit()
+            self.__db.close()
         self.__shutdown_completed = True
 
-    def pause_looping(self, value: bool) -> None:
+    def pause_looping(self, value):
         self.__pause_looping = value
 
     def stop(self):
         self.__keep_looping = False
         while not self.__shutdown_completed:
-            time.sleep(0.05)  # make function blocking to ensure staged shutdown
+            time.sleep(0.05)
 
     def purge_files(self):
         self.__purge_files = True
 
     def update_cache(self):
-        """Update the cache database with new and/or modified files
-        """
-
         self.__logger.debug('Updating cache')
 
-        # If the current collection of updated files is empty, check for disk-based changes
         if not self.__modified_files:
             self.__logger.debug('No unprocessed files in memory, checking disk')
             self.__modified_folders = self.__get_modified_folders()
             self.__modified_files = self.__get_modified_files(self.__modified_folders)
             self.__logger.debug('Found %d new files on disk', len(self.__modified_files))
 
-        # While we have files to process and looping isn't paused
         while self.__modified_files and not self.__pause_looping:
-            self.__logger.debug('Found %d new files on disk', len(self.__modified_files))
             file = self.__modified_files.pop(0)
             self.__logger.debug('Inserting: %s', file)
             self.__insert_file(file)
 
-        # If we've process all files in the current collection, update the cached folder info
         if not self.__modified_files:
             self.__update_folder_info(self.__modified_folders)
             self.__modified_folders.clear()
 
-        # If looping is still not paused, remove any files or folders from the db that are no longer on disk
         if not self.__pause_looping:
             self.__purge_missing_files_and_folders()
 
-        # Commit the current set of changes
-        self.__db_write_lock.acquire()
-        self.__db.commit()
-        self.__db_write_lock.release()
+        with self.__db_write_lock:
+            self.__db.commit()
 
-    def query_cache(self, where_clause: str, sort_clause: str = 'fname ASC') -> list:
+    def query_cache(self, where_clause, sort_clause='fname ASC'):
         cursor = self.__db.cursor()
-        cursor.row_factory = None  # we don't want the "sqlite3.Row" setting from the db here...
+        cursor.row_factory = None
         try:
-            sql = """SELECT file_id FROM all_data WHERE {0} ORDER BY {1}
-            """.format(where_clause, sort_clause)
+            sql = f"SELECT file_id FROM all_data WHERE {where_clause} ORDER BY {sort_clause}"
             return cursor.execute(sql).fetchall()
         except Exception:
             return []
@@ -121,29 +133,24 @@ class ImageCache:
     def get_file_info(self, file_id):
         if not file_id:
             return None
-        sql = "SELECT * FROM all_data where file_id = {0}".format(file_id)
+        sql = f"SELECT * FROM all_data where file_id = {file_id}"
         row = self.__db.execute(sql).fetchone()
         try:
             if row is not None and row['last_modified'] != os.path.getmtime(row['fname']):
                 self.__logger.debug('Cache miss: File %s changed on disk', row['fname'])
                 self.__insert_file(row['fname'], file_id)
-                row = self.__db.execute(sql).fetchone()  # description inserted in table
+                row = self.__db.execute(sql).fetchone()
         except OSError:
             self.__logger.warning("Image '%s' does not exist or is inaccessible", row['fname'])
-        if row is not None and row['latitude'] is not None and row['longitude'] is not None and row['location'] is None:
+        if row and row['latitude'] and row['longitude'] and row['location'] is None:
             if self.__get_geo_location(row['latitude'], row['longitude']):
-                row = self.__db.execute(sql).fetchone()  # description inserted in table
-        sql = "UPDATE file SET displayed_count = displayed_count + 1, last_displayed = ? WHERE file_id = ?"
-        starttime = round(time.time() * 1000)
-        self.__db_write_lock.acquire()
-        waittime = round(time.time() * 1000)
-        self.__db.execute(sql, (time.time(), file_id))  # Add file stats
-        self.__db_write_lock.release()
-        now = round(time.time() * 1000)
-        self.__logger.debug(
-            'Update file stats: Wait for %d ms and need %d ms for update ',
-            waittime - starttime, now - waittime)
-        return row  # NB if select fails (i.e. moved file) will return None
+                row = self.__db.execute(sql).fetchone()
+        with self.__db_write_lock:
+            self.__db.execute(
+                "UPDATE file SET displayed_count = displayed_count + 1, last_displayed = ? WHERE file_id = ?",
+                (time.time(), file_id)
+            )
+        return row
 
     def get_column_names(self):
         sql = "PRAGMA table_info(all_data)"
