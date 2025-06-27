@@ -11,8 +11,10 @@ import ssl
 import asyncio
 from datetime import datetime
 from .async_timer import init_timer
+from picframe.interface_peripherals import InterfacePeripherals
+from picframe import import_photos
 
-def make_date(txt):
+def make_date(txt: str) -> float:
     try:
         return datetime.strptime(txt, "%Y/%m/%d").timestamp()
     except ValueError:
@@ -108,7 +110,7 @@ class Controller:
         self.__model.set_next_file_to_previous_file()
         self.__viewer.reset_name_tm()
 
-    def delete(self):
+    def delete(self) -> None:
         if self.__viewer.is_video_playing():
             self.__viewer.stop_video()
         self.__model.delete_file()
@@ -124,11 +126,9 @@ class Controller:
             self.__logger.exception(f"Import task failed: {e}")
 
     async def start(self):
+        signal.signal(signal.SIGINT, self.__signal_handler)
         self.__viewer.slideshow_start()
-        from picframe.interface_peripherals import InterfacePeripherals
         self.__interface_peripherals = InterfacePeripherals(self.__model, self.__viewer, self)
-
-        from picframe import import_photos
         self._import_photos = import_photos.ImportPhotos(self.__model)
         self._import_task = asyncio.create_task(self.import_wrapper())
 
