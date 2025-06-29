@@ -1,35 +1,29 @@
+from picframe.get_image_meta import GetImageMeta
 import os
-import re
 from datetime import datetime
-from picframe import get_image_meta
 
 def get_exif_info(file_path_name: str) -> dict:
-    meta = get_image_meta(file_path_name)
+    meta_obj = GetImageMeta(file_path_name)
     
-    # Dict to store interesting EXIF data
-    # Note, the 'key' must match a field in the 'meta' table
     e: dict = {}
-
-    # Orientation is required, default = 1
-    e['orientation'] = int(meta.get('EXIF Orientation', 1))
+    e['orientation'] = meta_obj.get_exif('EXIF Orientation') or 1
 
     # Dimensions
-    e['width'] = int(meta.get('EXIF ExifImageWidth', 0))
-    e['height'] = int(meta.get('EXIF ExifImageHeight', 0))
+    e['width'], e['height'] = meta_obj.size
 
     # EXIF Data
-    e['f_number'] = float(meta.get('EXIF FNumber', 0))
-    e['make'] = meta.get('Image Make', None)
-    e['model'] = meta.get('Image Model', None)
-    e['exposure_time'] = meta.get('EXIF ExposureTime', None)
-    e['iso'] = float(meta.get('EXIF ISOSpeedRatings', 0))
-    e['focal_length'] = meta.get('EXIF FocalLength', None)
-    e['rating'] = int(meta.get('EXIF Rating', 0))
-    e['lens'] = meta.get('EXIF LensModel', None)
+    e['f_number'] = meta_obj.get_exif('EXIF FNumber') or 0
+    e['make'] = meta_obj.get_exif('Image Make')
+    e['model'] = meta_obj.get_exif('Image Model')
+    e['exposure_time'] = meta_obj.get_exif('EXIF ExposureTime')
+    e['iso'] = meta_obj.get_exif('EXIF ISOSpeedRatings') or 0
+    e['focal_length'] = meta_obj.get_exif('EXIF FocalLength')
+    e['rating'] = meta_obj.get_exif('EXIF Rating') or 0
+    e['lens'] = meta_obj.get_exif('EXIF LensModel')
     
-    if 'EXIF DateTimeOriginal' in meta:
+    dt_str = meta_obj.get_exif('EXIF DateTimeOriginal')
+    if dt_str:
         try:
-            dt_str = meta['EXIF DateTimeOriginal']
             e['exif_datetime'] = datetime.strptime(dt_str, '%Y:%m:%d %H:%M:%S').timestamp()
         except Exception:
             e['exif_datetime'] = os.path.getmtime(file_path_name)
@@ -37,20 +31,13 @@ def get_exif_info(file_path_name: str) -> dict:
         e['exif_datetime'] = os.path.getmtime(file_path_name)
 
     # GPS
-    if meta.get('GPS GPSLatitude') and meta.get('GPS GPSLongitude'):
-        try:
-            lat_str = meta['GPS GPSLatitude']
-            lon_str = meta['GPS GPSLongitude']
-            e['latitude'] = float(lat_str.split()[0])
-            e['longitude'] = float(lon_str.split()[0])
-        except Exception:
-            e['latitude'], e['longitude'] = None, None
-    else:
-        e['latitude'], e['longitude'] = None, None
+    loc = meta_obj.get_location()
+    e['latitude'] = loc['latitude']
+    e['longitude'] = loc['longitude']
 
     # IPTC
-    e['tags'] = meta.get('IPTC Keywords', None)
-    e['title'] = meta.get('IPTC Object Name', None)
-    e['caption'] = meta.get('IPTC Caption/Abstract', None)
+    e['tags'] = meta_obj.get_exif('IPTC Keywords')
+    e['title'] = meta_obj.get_exif('IPTC Object Name')
+    e['caption'] = meta_obj.get_exif('IPTC Caption/Abstract')
 
     return e

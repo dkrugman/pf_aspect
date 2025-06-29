@@ -3,7 +3,7 @@ import os
 import time
 import logging
 import threading
-from picframe import get_image_meta
+from picframe.get_image_meta import GetImageMeta
 from picframe.video_streamer import VIDEO_EXTENSIONS, get_video_info
 from picframe.image_meta_utils import get_exif_info
 import picframe.schema as schema  # adjust import path as needed
@@ -177,19 +177,30 @@ class ImageCache:
     # --- Returns a set of folders matching any of
     #     - Found on disk, but not currently in the 'folder' table
     #     - Found on disk, but newer than the associated record in the 'folder' table
-    #     - Found on disk, but flagged as 'missing' in the 'folder' table
+    #     - Found on disk, but flagged as 'missing' in the 'folder' table (REMOVED)
     # --- Note that all folders returned currently exist on disk
     def __get_modified_folders(self):
         out_of_date_folders = []
-        sql_select = "SELECT * FROM folder WHERE name = ?"
-        for dir in [d[0] for d in os.walk(self.__picture_dir, followlinks=self.__follow_links)]:
-            if os.path.basename(dir):
-                if os.path.basename(dir)[0] == '.':
+        sql_select = "SELECT * FROM folder WHERE name = ?"                      # Using picture_dir for orientation switching
+        parent_dir = os.path.dirname(self.__picture_dir)                        # so it's set to ~/Pictures/Landscape or Portrait
+        allowed_subfolders = ["Landscape", "Portrait", "Square"]                # need to loiok under the parent directory,
+                                                                                # hardcoding names for now
+        for subfolder in allowed_subfolders:
+            dir_path = os.path.join(parent_dir, subfolder)
+        
+            if not os.path.exists(dir_path):
+                continue  # skip if the subfolder does not exist
+
+            # Walk this subfolder recursively
+            for dir, _, _ in os.walk(dir_path, followlinks=self.__follow_links):
+                if os.path.basename(dir).startswith('.'):
                     continue  # ignore hidden folders
-            mod_tm = int(os.stat(dir).st_mtime)
-            found = self.__db.execute(sql_select, (dir,)).fetchone()
-            if not found or found['last_modified'] < mod_tm or found['missing'] == 1:
-                out_of_date_folders.append((dir, mod_tm))
+
+                mod_tm = int(os.stat(dir).st_mtime)
+                found = self.__db.execute(sql_select, (dir,)).fetchone()
+
+                if not found or found['last_modified'] < mod_tm:
+                    out_of_date_folders.append((dir, mod_tm))
         return out_of_date_folders
 
     def __get_modified_files(self, modified_folders):
@@ -216,49 +227,44 @@ class ImageCache:
         return out_of_date_files
 
     def __insert_file(self, file, file_id=None):
-        file_insert = "INSERT OR REPLACE INTO file(folder_id, basename, extension, last_modified) VALUES((SELECT folder_id from folder where name = ?), ?, ?, ?)"  # noqa: E501
-        file_update = "UPDATE file SET folder_id = (SELECT folder_id from folder where name = ?), basename = ?, extension = ?, last_modified = ? WHERE file_id = ?"  # noqa: E501
-        # Insert the new folder if it's not already in the table. Update the missing field separately.
+        file_insert = "INSERT OR REPLACE INTO file(folder_id, basename, extension, width, height, last_modified, source) VALUES((SELECT folder_id from folder where name = ?), ?, ?, ?, ?, ?, ?)"  # noqa: E501
+        # file_update = "UPDATE file SET folder_id = (SELECT folder_id from folder where name = ?), basename = ?, extension = ?, last_modified = ?, source = ? WHERE file_id = ?"  # noqa: E501
+        # Insert the new folder if it's not already in the table.
         folder_insert = "INSERT OR IGNORE INTO folder(name) VALUES(?)"
-        folder_update = "UPDATE folder SET missing = 0 where name = ?"
 
-        mod_tm = os.path.getmtime(file)
-        dir, file_only = os.path.split(file)
-        base, extension = os.path.splitext(file_only)
-
-        # Get the file's meta info and build the INSERT statement dynamically
+          # Get the file's meta info and build the INSERT statement dynamically
         meta = {}
-        ext = os.path.splitext(file)[1].lower()
-        if ext in VIDEO_EXTENSIONS: # no exif info available
-            meta = self.__get_video_info(file)
-        else:
-            meta = self.__get_exif_info(file)
+  
+        meta = get_exif_info(file)
+        width = meta.get('width')
+        height = meta.get('height')
         meta_insert = self.__get_meta_sql_from_dict(meta)
         vals = list(meta.values())
         vals.insert(0, file)
 
+        mod_tm = os.path.getmtime(file)
+        dir, file_only = os.path.split(file)
+        base, extension = os.path.splitext(file_only)
+        extension = extension.lower()
+        source = "ImageCache"
+
         # Insert this file's info into the folder, file, and meta tables
-        self.__db_write_lock.acquire()
-        self.__db.execute(folder_insert, (dir,))
-        self.__db.execute(folder_update, (dir,))
-        if file_id is None:
-            self.__db.execute(file_insert, (dir, base, extension.lstrip("."), mod_tm))
-        else:
-            self.__db.execute(file_update, (dir, base, extension.lstrip("."), mod_tm, file_id))
-        try:
-            self.__db.execute(meta_insert, vals)
-        except:
-            self.__logger.error(f"###FAILED meta_insert = {meta_insert}, vals = {vals}")
-        self.__db_write_lock.release()
+        with self.__db_write_lock:
+            self.__db.execute(folder_insert, (dir,))
+            if file_id is None:
+                self.__db.execute(file_insert, (dir, base, extension.lstrip("."), width, height, mod_tm, source))
+            try:
+                self.__db.execute(meta_insert, vals)
+            except:
+                self.__logger.error(f"###FAILED meta_insert = {meta_insert}, vals = {vals}")
 
     def __update_folder_info(self, folder_collection):
         update_data = []
-        sql = "UPDATE folder SET last_modified = ?, missing = 0 WHERE name = ?"
+        sql = "UPDATE folder SET last_modified = ? WHERE name = ?"
         for folder, modtime in folder_collection:
             update_data.append((modtime, folder))
-        self.__db_write_lock.acquire()
-        self.__db.executemany(sql, update_data)
-        self.__db_write_lock.release()
+        with self.__db_write_lock:
+            self.__db.executemany(sql, update_data)
 
     def __get_meta_sql_from_dict(self, dict):
         columns = ', '.join(dict.keys())
@@ -275,12 +281,11 @@ class ImageCache:
         # Flag or delete any non-existent folders from the db. Note, deleting will automatically
         # remove orphaned records from the 'file' and 'meta' tables
         if len(folder_id_list):
-            self.__db_write_lock.acquire()
-            if self.__purge_files:
-                self.__db.executemany('DELETE FROM folder WHERE folder_id = ?', folder_id_list)
-            else:
-                self.__db.executemany('UPDATE folder SET missing = 1 WHERE folder_id = ?', folder_id_list)
-            self.__db_write_lock.release()
+            with self.__db_write_lock:
+                if self.__purge_files:
+                    self.__db.executemany('DELETE FROM folder WHERE folder_id = ?', folder_id_list)
+                else:
+                    self.__logger.error(f"Folder in DB not found on disk. folder_id_list: {folder_id_list}")
 
         # Find files in the db that are no longer on disk
         if self.__purge_files:
@@ -292,9 +297,8 @@ class ImageCache:
             # Delete any non-existent files from the db. Note, this will automatically
             # remove matching records from the 'meta' table as well.
             if len(file_id_list):
-                self.__db_write_lock.acquire()
-                self.__db.executemany('DELETE FROM file WHERE file_id = ?', file_id_list)
-                self.__db_write_lock.release()
+                with self.__db_write_lock:
+                    self.__db.executemany('DELETE FROM file WHERE file_id = ?', file_id_list)
             self.__purge_files = False
 
     def __get_video_info(self, file_path_name: str) -> dict:
@@ -334,7 +338,7 @@ class ImageCache:
         e['focal_length'] = getattr(meta, 'focal_length', None)
         e['rating'] = getattr(meta, 'rating', None)
         e['lens'] = getattr(meta, 'lens', None)
-        e['exif_datetime'] = meta.exif_datetime if not None else os.path.getmtime(file_path_name)
+        e['exif_datetime'] = meta.exif_datetime if meta.exif_datetime is not None else os.path.getmtime(file_path_name)
 
         if meta.gps_coords is not None:
             lat, lon = meta.gps_coords

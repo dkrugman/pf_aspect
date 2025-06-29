@@ -143,7 +143,7 @@ class Pic:                                               # TODO could this be do
                  f_number=0, exposure_time=None, iso=0, focal_length=None,
                  make=None, model=None, lens=None, rating=None, latitude=None,
                  longitude=None, width=0, height=0, is_portrait=0, location=None, title=None,
-                 caption=None, tags=None):
+                 caption=None, tags=None, nix_caption=None):
         self.fname = fname
         self.last_modified = last_modified
         self.file_id = file_id
@@ -166,6 +166,7 @@ class Pic:                                               # TODO could this be do
         self.tags = tags
         self.caption = caption
         self.title = title
+        self.nix_caption = nix_caption
         
 
 class Model:
