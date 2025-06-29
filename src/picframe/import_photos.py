@@ -1,7 +1,76 @@
-import os, sys, time, logging, warnings, json, re, pytz, ntplib, urllib3, requests, sqlite3, threading, asyncio
+"""
+ImportPhotos
+
+Handles importing photos from third-party services to the local filesystem.
+Integrates with configured import sources (e.g. Nixplay) and maintains imported_playlists database table.
+"""
+
+import os
+import sys
+import time
+import logging
+import warnings
+import json
+import re
+import pytz
+import ntplib
+import urllib3
+import requests
+import sqlite3
+import threading
+import asyncio
+import shutil
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode, urlparse
-from requests.exceptions import HTTPError   
+from requests.exceptions import HTTPError
+
+from picframe.schema import create_schema
+
+def extract_filename_and_ext(url_or_path):
+    """
+    Extracts the base filename and extension from a URL or local file path.
+
+        Returns:
+        tuple: (base, ext)
+            base (str): filename without extension
+            ext (str): extension without dot, lowercase
+    """
+    if not url_or_path:
+        return None, None
+    
+    # Remove query parameters if URL
+    filename = url_or_path.split('/')[-1].split('?')[0]
+    base, ext = os.path.splitext(filename)
+    ext = ext.lstrip('.').lower()
+    return base, ext
+
+def unix_to_utc_string(timestamp):
+    """
+    Converts a UNIX timestamp (int/str) or ISO 8601 string to UTC ISO format,
+    auto-detecting millisecond/microsecond inputs.
+    """
+    if isinstance(timestamp, str):
+        try:
+            # Try ISO 8601 parsing
+            dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+            return dt.isoformat()
+        except ValueError:
+            timestamp = int(timestamp)
+
+    elif isinstance(timestamp, (float, int)):
+        timestamp = int(timestamp)
+    else:
+        raise ValueError(f"Unsupported timestamp type: {timestamp}")
+
+    # Adjust if timestamp is in ms or us
+    if timestamp > 1e14:
+        timestamp = timestamp / 1e6
+    elif timestamp > 1e11:
+        timestamp = timestamp / 1e3
+
+    dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+    return dt.isoformat()
 
 class LoginError(Exception):
     pass
@@ -25,19 +94,14 @@ class ImportPhotos:
         if not self.__sources:
             raise Exception("No import sources configured! Aborting creation of ImportPhotos instance.")   
         model_config = self.__model.get_model_config()
-        self.__picture_dir = model_config['pic_dir']
-        self.__db_file = model_config['db_file']
+        self.__db_file = os.path.expanduser(model_config['db_file'])
         self.__import_dir = self.__model.get_aspect_config()["import_dir"]
-        self.__session = None
-        self.__modified_folders = []
-        self.__modified_files = []
-        self.__cached_file_stats = []                                       # collection shared between threads
-        self.__source_playlists = []
         self._importing = False
-        self.__db = self.__create_open_db(self.__db_file)
+        self.__db = sqlite3.connect(self.__db_file, check_same_thread=False)
+        create_schema(self.__db)
         self.__db_write_lock = threading.Lock()                             # lock to serialize db writes between threads
  
-    async def check_for_updates(self):
+    async def check_for_updates(self) -> None:
         self._importing = True
         try:
             loop = asyncio.get_running_loop()
@@ -45,16 +109,15 @@ class ImportPhotos:
         finally:
             self._importing = False
 
-    def get_source_playlists(self, source):
+    def get_source_playlists(self, source) -> list:
         """Retrieves playlist names that match identifier and last_updated_date from external sources."""      
-        source_prefix = f"{source}_"
         login_url = self.__sources[source]['login_url']
         acct_id  = self.__sources[source]['acct_id']
         acct_pwd  = self.__sources[source]['acct_pwd']
         playlist_url = self.__sources[source]['playlist_url']
         identifier = self.__sources[source]['identifier']
 
-        if source == 'nixplay':                                 # Designing for multiple sources, but currently only Nixplay is implemented
+        if source == 'nixplay':                                             # Designing for multiple sources, but currently only Nixplay is implemented
             try:
                 session = self.create_nixplay_authorized_client(acct_id, acct_pwd, login_url)
                 if session.cookies.get("prod.session.id") is None:
@@ -89,23 +152,24 @@ class ImportPhotos:
             for plist in playlists:
                 pid = plist["id"]
                 pname = plist["playlist_name"]
-                updated = plist["last_updated_date"]
+                picture_count = plist["picture_count"]
+                last_modified = plist["last_modified"]
+                last_imported = 0                                           # 0 will force all media to be checked
                 current_ids.add(pid)
-
+                self.__logger.info(f"playlist: {pname}")
                 # Insert or replace if updated
                 cur.execute("""
-                    INSERT INTO imported_playlists (source, playlist_id, playlist_name, last_updated_date)
-                    VALUES (?, ?, ?, ?)
+                    INSERT INTO imported_playlists (source, playlist_name, playlist_id, picture_count, last_modified, last_imported)
+                    VALUES (?, ?, ?, ?, ?, ?)
                     ON CONFLICT(source, playlist_id) DO UPDATE SET
                         playlist_name = excluded.playlist_name,
-                        last_updated_date = excluded.last_updated_date
-                """, (source, pid, pname, updated))
+                        last_modified = excluded.last_modified
+                """, (source, pname, pid, picture_count, unix_to_utc_string(last_modified), last_imported))
 
             # Delete any playlists no longer present in source
             stale_ids = existing_ids - current_ids
             for pid in stale_ids:
                 cur.execute("DELETE FROM imported_playlists WHERE source = ? AND playlist_id = ?", (source, pid))
-
             self.__db.commit()
 
 
@@ -115,12 +179,51 @@ class ImportPhotos:
             return
         
         for source in self.__sources:                                       # Designing for multiple sources, but currently only Nixplay is implemented
-            if self.__sources[source]['enable']:
-                playlists = self.get_source_playlists(source)
-                if playlists:
-                    self.update_imported_playlists_db(source, playlists)
-      
+            if not self.__sources[source]['enable']:
+                continue
 
+            playlists = self.get_source_playlists(source)
+            if playlists:
+                self.update_imported_playlists_db(source, playlists)
+                with self.__db_write_lock:                                  # Import media only for playlists with last_imported = 0
+                    cur = self.__db.cursor()
+                    cur.execute("""
+                        SELECT playlist_id, playlist_name FROM imported_playlists
+                        WHERE source = ? AND last_imported = 0
+                    """, (source,))
+                    to_import = cur.fetchall()
+
+                if not to_import:
+                    self.__logger.info(f"No unimported playlists for source {source}")
+                    continue
+                
+                session = self.create_nixplay_authorized_client(            # Reuse one session per source if allowed
+                    self.__sources[source]['acct_id'],
+                    self.__sources[source]['acct_pwd'],
+                    self.__sources[source]['login_url']
+                )
+
+                for playlist_id, playlist_name in to_import:
+                    self.__logger.info(f"Importing media for unimported playlist: {playlist_name}")
+
+                    item_path = "slides"                                    # Adjust as needed
+
+                    media_items = self.get_nixplay_media(
+                        session,
+                        self.__sources[source]['playlist_url'],
+                        item_path,
+                        [(playlist_id, playlist_name, self.__import_dir)]
+                    )
+
+                    self.save_downloaded_media(source, playlist_id, media_items)
+                    
+                    with self.__db_write_lock:                              # Update last_imported timestamp
+                        cur.execute("""
+                            UPDATE imported_playlists SET last_imported = ?
+                            WHERE source = ? AND playlist_id = ?
+                        """, (unix_to_utc_string(int(time.time())), source, playlist_id))
+                        self.__db.commit()
+      
     def create_nixplay_authorized_client(self, acct_id: str, acct_pwd: str, login_url: str):
         """Submits login form and returns valid session for Nixplay."""    
         data = {
@@ -133,7 +236,7 @@ class ImportPhotos:
         return session
 
     def get_playlist_names(self, session, source, playlist_url, identifier):
-        """Retrieves playlist names that match key and last_updated_date from nixplay cloud."""
+        """Retrieves playlist names that match identifier and last_updated_date from nixplay cloud."""
         json = session.get(playlist_url).json()
         playlists = []
         for plist in json:
@@ -142,8 +245,10 @@ class ImportPhotos:
                     "source": source,
                     "id": plist["id"],
                     "playlist_name": plist["playlist_name"],
-                    "last_updated_date": plist["last_updated_date"]
+                    "last_modified": plist["last_updated_date"],
+                    "picture_count": plist["picture_count"]
                 }
+                self.__logger.info(f"{plist['playlist_name']}, {plist['id']}")
                 playlists.append(data)
         return playlists
 
@@ -151,15 +256,25 @@ class ImportPhotos:
         """Retrieves individual media item metadata from nixplay cloud/"""
         media_items = []
         for item_id in playlists_to_update:
-            url = playlist_url + str(item_id[0]) + '/' + item_path
-            json = session.get(url).json()
-            for slide in json[item_path]:
-                data = {
-                        "mediaItemId": slide["mediaItemId"],
-                        "originalUrl": slide["originalUrl"]
-                        }
-                media_items.append(data)
+            url = playlist_url + '/' + str(item_id[0]) + '/' + item_path
+            response = session.get(url).json()
+            self.__logger.debug(f"get_nixplay_media url: {url}")
+            # filename = f"/home/pi/nixplay_playlist_{str(item_id[0])}.json"
+            # with open(filename, "w") as f:
+            #     json.dump(response, f, indent=2)
+
+        for slide in response.get(item_path, []):
+            data = {
+                "mediaItemId": slide.get("mediaItemId"),
+                "caption": slide.get("caption", ""),
+                "mediaType": slide.get("mediaType"),
+                "originalUrl": slide.get("originalUrl"),
+                "timestamp": slide.get("timestamp"),
+                "filename": slide.get("filename", None)  # returns None if 'filename' not present
+            }
+            media_items.append(data)
         return media_items
+
 
 # for each playlist (source_playlistname)
 # check if in DB
@@ -169,26 +284,8 @@ class ImportPhotos:
 # delete removed playlists & files
 # item_path = "slides"                                            # NIXPLAY   url is: playlist_url + list_id + '/' + item_path
 
-    def __loop(self):
-        pass
-
     def get_timer_task(self):
         return self.check_for_updates
-
-    def __create_open_db(self, db_file):
-        db_file = os.path.expanduser(db_file)
-        db = sqlite3.connect(db_file, check_same_thread=False)
-        with db:
-            db.execute("""
-                CREATE TABLE IF NOT EXISTS imported_playlists (
-                    source TEXT NOT NULL,
-                    playlist_id TEXT NOT NULL,
-                    playlist_name TEXT NOT NULL,
-                    last_updated_date TEXT NOT NULL,
-                    PRIMARY KEY (source, playlist_id)
-                )
-            """)
-        return db
 
     def get_ntp_time(self):
         """Gets the current time from an NTP server."""
@@ -213,7 +310,7 @@ class ImportPhotos:
                 return False
         return True
 
-    def create_valid_folder_name(self, string):
+    def create_valid_folder_name(self, string) -> str:
         """Converts a string to a valid folder name."""
         string = re.sub(r'[\\/:*?"<>|]', '_', string)                       # Replace invalid characters with underscores
         string = string.strip()                                             # Remove leading/trailing whitespace
@@ -228,6 +325,70 @@ class ImportPhotos:
         diff = local_mtime - nix_mtime                                      # if diff is negative, nixcloud playlist has changed - we must check local contents for adds/changes/deletes
         return diff
 
+
+    def save_downloaded_media(self, source, playlist_id, media_items):
+        """
+        Downloads media items and inserts their metadata into imported_files table.
+        
+        Args:
+            source (str): The source name (e.g. 'nixplay').
+            playlist_id (str): The ID of the playlist these media items belong to.
+            media_items (list): List of dicts with keys including 'mediaItemId', 'originalUrl'.
+        """
+        self.__logger.info(f"Storing {len(media_items)} media items for playlist {playlist_id}")
+        
+        import_dir_path = Path(os.path.expanduser(self.__import_dir))
+        import_dir_path.mkdir(parents=True, exist_ok=True)
+
+        with self.__db_write_lock:
+            cur = self.__db.cursor()
+            for item in media_items:
+                media_id = item.get("mediaItemId")
+                url = item.get("originalUrl")
+                nix_caption = item.get("caption")
+                timestamp = item.get("timestamp")
+                orig_filename = item.get("filename", None)
+
+                if not url:
+                    self.__logger.warning(f"No URL for mediaItemId {media_id}, skipping.")
+                    continue
+
+                basename, extension = extract_filename_and_ext(orig_filename or url)
+
+                basename = f"{source}_{playlist_id}_{basename}"
+                full_name = f"{basename}.{extension}"
+                local_path = import_dir_path / full_name
+
+                # Download file
+                try:
+                    response = requests.get(url, stream=True, timeout=30)
+                    response.raise_for_status()
+                    with open(local_path, 'wb') as f:
+                        shutil.copyfileobj(response.raw, f)
+                    self.__logger.info(f"Downloaded {full_name}")
+                except Exception as e:
+                    self.__logger.error(f"Failed to download {url}: {e}")
+                    continue
+
+                # Insert into database
+                cur.execute("""
+                    INSERT INTO imported_files (source, playlist_id, media_item_id, original_url, basename, extension,nix_caption, orig_extension, processed, orig_timestamp, last_modified)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    source,
+                    playlist_id,
+                    media_id,
+                    url,
+                    basename,
+                    extension,                                                    # may be changed to .jxl in later processing
+                    nix_caption,
+                    extension,                                                    # original extension same as stored
+                    0,
+                    unix_to_utc_string(timestamp),
+                    unix_to_utc_string(int(os.path.getmtime(local_path)))
+                ))
+
+            self.__db.commit()
 
 # CHECK OR CREATE SUBDIRECTORIES
 #     playlists_to_update = []

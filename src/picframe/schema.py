@@ -9,45 +9,93 @@ REQUIRED_SCHEMA_VERSION = 3
 def create_schema(db):
     """Creates or upgrades the database schema to REQUIRED_SCHEMA_VERSION."""
 
+    sql_slideshow_table = """
+        CREATE TABLE IF NOT EXISTS slideshow (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_id      INTEGER NOT NULL,
+            basename     TEXT NOT NULL,
+            extension    TEXT NOT NULL,
+            orientation  TEXT NOT NULL,
+            created      REAL DEFAULT 0 NOT NULL,
+            played       INTEGER DEFAULT 0 NOT NULL
+        )"""
+
+    sql_imported_playlists_table = """
+        CREATE TABLE IF NOT EXISTS imported_playlists (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            source         TEXT NOT NULL,
+            playlist_name  TEXT NOT NULL,
+            playlist_id    INTEGER,
+            picture_count  INTEGER,
+            last_modified  REAL DEFAULT 0 NOT NULL,
+            last_imported  REAL DEFAULT 0 NOT NULL,
+            UNIQUE(source, playlist_id)
+        )"""
+
+    sql_imported_files_table = """
+        CREATE TABLE IF NOT EXISTS imported_files (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            source         TEXT NOT NULL,
+            playlist_id    TEXT NOT NULL,
+            media_item_id  TEXT,
+            original_url   TEXT,
+            basename       TEXT NOT NULL,     
+            extension      TEXT NOT NULL,
+            nix_caption    TEXT,
+            width          INTEGER,
+            height         INTEGER,
+            orig_extension TEXT NOT NULL,
+            orig_width     INTEGER,
+            orig_height    INTEGER,
+            orig_timestamp REAL,
+            processed      REAL DEFAULT 0 NOT NULL,
+            last_modified  REAL DEFAULT 0 NOT NULL
+        )"""
+
     sql_folder_table = """
         CREATE TABLE IF NOT EXISTS folder (
-            folder_id INTEGER NOT NULL PRIMARY KEY,
-            name TEXT UNIQUE NOT NULL,
-            last_modified REAL DEFAULT 0 NOT NULL
+            folder_id      INTEGER NOT NULL PRIMARY KEY,
+            name TEXT      UNIQUE NOT NULL,
+            last_modified  REAL DEFAULT 0 NOT NULL
         )"""
 
     sql_file_table = """
         CREATE TABLE IF NOT EXISTS file (
-            file_id INTEGER NOT NULL PRIMARY KEY,
-            folder_id INTEGER NOT NULL,
-            basename  TEXT NOT NULL,
-            extension TEXT NOT NULL,
-            last_modified REAL DEFAULT 0 NOT NULL,
+            file_id         INTEGER NOT NULL PRIMARY KEY,
+            folder_id       INTEGER NOT NULL,
+            source          TEXT NOT NULL,
+            playlist        INTEGER,
+            basename        TEXT NOT NULL,
+            extension       TEXT NOT NULL,
+            width           INTEGER,
+            height          INTEGER,
+            last_modified   REAL DEFAULT 0 NOT NULL,
             displayed_count INTEGER DEFAULT 0 NOT NULL,
-            last_displayed REAL DEFAULT 0 NOT NULL,
-            UNIQUE(folder_id, basename, extension)
+            last_displayed  REAL DEFAULT 0 NOT NULL,
+            UNIQUE(folder_id, source, playlist, basename, extension)
         )"""
 
     sql_meta_table = """
         CREATE TABLE IF NOT EXISTS meta (
-            file_id INTEGER NOT NULL PRIMARY KEY,
-            orientation INTEGER DEFAULT 1 NOT NULL,
+            file_id       INTEGER NOT NULL PRIMARY KEY,
+            orientation   INTEGER DEFAULT 1 NOT NULL,
             exif_datetime REAL DEFAULT 0 NOT NULL,
-            f_number REAL DEFAULT 0 NOT NULL,
+            f_number      REAL DEFAULT 0 NOT NULL,
             exposure_time TEXT,
-            iso REAL DEFAULT 0 NOT NULL,
-            focal_length TEXT,
-            make TEXT,
-            model TEXT,
-            lens TEXT,
-            rating INTEGER,
-            latitude REAL,
-            longitude REAL,
-            width INTEGER DEFAULT 0 NOT NULL,
-            height INTEGER DEFAULT 0 NOT NULL,
-            title TEXT,
-            caption TEXT,
-            tags TEXT
+            iso           REAL DEFAULT 0 NOT NULL,
+            focal_length  TEXT,
+            make          TEXT,
+            model         TEXT,
+            lens          TEXT,
+            rating        INTEGER,
+            latitude      REAL,
+            longitude     REAL,
+            width         INTEGER DEFAULT 0 NOT NULL,
+            height        INTEGER DEFAULT 0 NOT NULL,
+            title         TEXT,
+            caption       TEXT,
+            tags          TEXT,
+            nix_caption   TEXT
         )"""
 
     sql_meta_index = """
@@ -55,9 +103,9 @@ def create_schema(db):
 
     sql_location_table = """
         CREATE TABLE IF NOT EXISTS location (
-            id INTEGER NOT NULL PRIMARY KEY,
-            latitude REAL,
-            longitude REAL,
+            id          INTEGER NOT NULL PRIMARY KEY,
+            latitude    REAL,
+            longitude   REAL,
             description TEXT,
             UNIQUE (latitude, longitude)
         )"""
@@ -104,6 +152,9 @@ def create_schema(db):
     schema_statements = [
         sql_folder_table,
         sql_file_table,
+        sql_imported_playlists_table,
+        sql_imported_files_table,
+        sql_slideshow_table,
         sql_meta_table,
         sql_location_table,
         sql_meta_index,
