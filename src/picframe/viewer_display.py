@@ -1,4 +1,5 @@
 import os, logging, time, subprocess, pi3d  #type: ignore
+from .async_timer import init_timer
 from typing import Optional, List, Tuple
 from datetime import datetime
 from PIL import Image, ImageFilter, ImageFile
@@ -27,7 +28,7 @@ def parse_show_text(txt):
 class ViewerDisplay:
 
     def __init__(self, config):
-        self.__logger = logging.getLogger("viewer_display.ViewerDisplay")
+        self.__logger = logging.getLogger(__name__)
         self.__logger.debug('ViewerDisplay starting')
         self.__blur_amount = config['blur_amount']
         self.__blur_zoom = config['blur_zoom']
@@ -195,6 +196,7 @@ class ViewerDisplay:
         if pic is not None and paused is not None:  # text needs to be refreshed
             self.__make_text(pic, paused)
         self.__name_tm = max(self.__name_tm, time.time() + self.__show_text_tm)
+        self.__logger.debug("PIC: {pic} PAUSED: {paused} NAME_TM: {self.__name_tm} SHOW_TEXT_TM: {self.__show_text_tm}")
 
     def set_brightness(self, val):
         self.__slide.unif[55] = val  # take immediate effect
@@ -525,12 +527,19 @@ class ViewerDisplay:
             self.__logger.warning("Cause: %s", e)
             return None
 
-    def slideshow_is_running(self, pic: Optional[List[Optional[get_image_meta.GetImageMeta]]] = None,
+    def slideshow_transition(self, pic: Optional[List[Optional[get_image_meta.GetImageMeta]]] = None,
                              time_delay: float = 200.0, fade_time: float = 10.0,
                              paused: bool = False) -> Tuple[bool, bool, bool]:
         """
         Handles the slideshow logic, including transitioning between images or videos.
 
+        NEW: Next frame is now triggered from async timer, not from the main loop.
+        Transition begins when next frame is called --> TIME 0
+        Fade time, time_delay, name_tm, show_text_tm etc. are all relative to TIME 0
+        Next image time is set to TIME 0 + time_delay
+    
+        OLD:
+        
         Parameters:
         -----------
         pic : Optional[List[Optional[get_image_meta.GetImageMeta]]], optional
@@ -550,132 +559,141 @@ class ViewerDisplay:
             - Whether to skip the current image.
             - Whether a video is currently playing.
         """
-        loop_running = self.__display.loop_running()
-        # if video is playing, we are done here
-        video_playing = False
-        if self.is_video_playing():
-            self.pause_video(paused)
-            video_playing = True
-            if self.__last_frame_tex is not None:  # first time through
-                self.__sfg = self.__last_frame_tex
-                self.__last_frame_tex = None
-                self.__slide.set_textures([self.__sfg, self.__sbg])
-            self.__slide.draw()
-            return (loop_running, False, video_playing)  # now returns tuple with skip image flag and video_time added
+        loop_running = False
+        if fade_time > time_delay:
+            self.__logger.warning("Fade time %f is longer than time delay %f, setting fade time to half of display time", fade_time, time_delay)  # noqa: E501
+            fade_time = display_time / 2
 
-        tm = time.time()
-        if pic is not None:
-            self.stop_video()
-            if pic and os.path.splitext(pic.fname)[1].lower() in VIDEO_EXTENSIONS:
-                self.__video_path = pic.fname
-                textures = self.__load_video_frames(self.__video_path)
-                if textures is not None:
-                    new_sfg, self.__last_frame_tex = textures
-                else:
-                    new_sfg = None
-            else:  # normal image
-                new_sfg = self.__tex_load(pic, (self.__display.width, self.__display.height))
+        end_time = time.time() + fade_time 
+        while time.time() < end_time + .5:           
+            video_playing = False
+            if self.is_video_playing():                # if video is playing, we are done here
+                self.pause_video(paused)
+                video_playing = True
+                if self.__last_frame_tex is not None:  # first time through
+                    self.__sfg = self.__last_frame_tex
+                    self.__last_frame_tex = None
+                    self.__slide.set_textures([self.__sfg, self.__sbg])
+                self.__slide.draw()
+
             tm = time.time()
-            self.__next_tm = tm + time_delay
-            self.__name_tm = tm + fade_time + self.__show_text_tm  # text starts after slide transition
-            if new_sfg is not None:  # this is a possible return value which needs to be caught
-                self.__sbg = self.__sfg
-                self.__sfg = new_sfg
-            else:
-                (self.__sbg, self.__sfg) = (self.__sfg, self.__sbg)  # swap existing images over
-            self.__alpha = 0.0
-            if fade_time > 0.5:
-                self.__delta_alpha = 1.0 / (self.__fps * fade_time)  # delta alpha
-            else:
-                self.__delta_alpha = 1.0  # else jump alpha from 0 to 1 in one frame
-            # set the file name as the description
-            if self.__show_text_tm > 0.0:
-                self.__make_text(pic, paused)  # send even if pic is None to clear previous text # noqa: E501
-            else:  # could have a NO IMAGES selected and being drawn
-                self.__textblock = None
 
-            if self.__sbg is None:  # first time through
-                self.__sbg = self.__sfg
-            self.__slide.set_textures([self.__sfg, self.__sbg])
-            self.__slide.unif[45:47] = self.__slide.unif[42:44]  # transfer front width and height factors to back
-            self.__slide.unif[51:53] = self.__slide.unif[48:50]  # transfer front width and height offsets
-            wh_rat = (self.__display.width * self.__sfg.iy) / (self.__display.height * self.__sfg.ix)
-            if (wh_rat > 1.0 and self.__fit) or (wh_rat <= 1.0 and not self.__fit):
-                sz1, sz2, os1, os2 = 42, 43, 48, 49
-            else:
-                sz1, sz2, os1, os2 = 43, 42, 49, 48
-                wh_rat = 1.0 / wh_rat
-            self.__slide.unif[sz1] = wh_rat
-            self.__slide.unif[sz2] = 1.0
-            self.__slide.unif[os1] = (wh_rat - 1.0) * 0.5
-            self.__slide.unif[os2] = 0.0
-            if self.__kenburns:
-                self.__xstep, self.__ystep = (self.__slide.unif[i] * 2.0 / (time_delay - fade_time) for i in (48, 49))
-                self.__slide.unif[48] = 0.0
-                self.__slide.unif[49] = 0.0
-
-        if self.__kenburns and self.__alpha >= 1.0:
-            t_factor = time_delay - fade_time - self.__next_tm + tm
-            # add exponentially smoothed tweening in case of timing delays etc. to avoid 'jumps'
-            self.__slide.unif[48] = self.__slide.unif[48] * 0.95 + self.__xstep * t_factor * 0.05
-            self.__slide.unif[49] = self.__slide.unif[49] * 0.95 + self.__ystep * t_factor * 0.05
-
-        if self.__alpha < 1.0:  # transition is happening
-            self.__alpha += self.__delta_alpha
-            if self.__alpha > 1.0:
-                self.__alpha = 1.0
-            self.__slide.unif[44] = self.__alpha * self.__alpha * (3.0 - 2.0 * self.__alpha)
-
-        if (self.__next_tm - tm) < 5.0 or self.__alpha < 1.0:
-            self.__in_transition = True  # set __in_transition True a few seconds *before* end of previous slide
-        else:  # no transition effect safe to update database, resuffle etc
-            self.__in_transition = False
-            if self.__video_path is not None and tm > self.__name_tm:
-                # start video stream
-                if self.__video_streamer is None or not self.__video_streamer.player_alive():
-                    self.__video_streamer = VideoStreamer(
-                        self.__display_x, self.__display_y,
-                        self.__display.width, self.__display.height,
-                        self.__video_path, fit_display=self.__video_fit_display
-                    )
+            if pic is not None and not loop_running:
+                self.stop_video()
+                if pic and os.path.splitext(pic.fname)[1].lower() in VIDEO_EXTENSIONS:
+                    self.__video_path = pic.fname
+                    textures = self.__load_video_frames(self.__video_path)
+                    if textures is not None:
+                        new_sfg, self.__last_frame_tex = textures
+                    else:
+                        new_sfg = None
+                else:  # normal image
+                    new_sfg = self.__tex_load(pic, (self.__display.width, self.__display.height))
+                tm = time.time()
+                self.__next_tm = tm + time_delay
+                self.__name_tm = tm + fade_time + self.__show_text_tm  # text starts after slide transition
+                if new_sfg is not None:  # this is a possible return value which needs to be caught
+                    self.__sbg = self.__sfg
+                    self.__sfg = new_sfg
                 else:
-                    self.__video_streamer.play(self.__video_path)
-                self.__video_path = None
+                    (self.__sbg, self.__sfg) = (self.__sfg, self.__sbg)  # swap existing images over
+                self.__alpha = 0.0
+                if fade_time > 0.5:
+                    self.__delta_alpha = 1.0 / (self.__fps * fade_time)  # delta alpha
+                else:
+                    self.__delta_alpha = 1.0  # else jump alpha from 0 to 1 in one frame
+                # set the file name as the description
+                if self.__show_text_tm > 0.0:
+                    self.__make_text(pic, paused)  # send even if pic is None to clear previous text # noqa: E501
+                else:  # could have a NO IMAGES selected and being drawn
+                    self.__textblock = None
 
-        skip_image = False  # can add possible reasons to skip image below here
+                if self.__sbg is None:  # first time through
+                    self.__sbg = self.__sfg
+                self.__slide.set_textures([self.__sfg, self.__sbg])
+                self.__slide.unif[45:47] = self.__slide.unif[42:44]  # transfer front width and height factors to back
+                self.__slide.unif[51:53] = self.__slide.unif[48:50]  # transfer front width and height offsets
+                wh_rat = (self.__display.width * self.__sfg.iy) / (self.__display.height * self.__sfg.ix)
+                if (wh_rat > 1.0 and self.__fit) or (wh_rat <= 1.0 and not self.__fit):
+                    sz1, sz2, os1, os2 = 42, 43, 48, 49
+                else:
+                    sz1, sz2, os1, os2 = 43, 42, 49, 48
+                    wh_rat = 1.0 / wh_rat
+                self.__slide.unif[sz1] = wh_rat
+                self.__slide.unif[sz2] = 1.0
+                self.__slide.unif[os1] = (wh_rat - 1.0) * 0.5
+                self.__slide.unif[os2] = 0.0
+                if self.__kenburns:
+                    self.__xstep, self.__ystep = (self.__slide.unif[i] * 2.0 / (time_delay - fade_time) for i in (48, 49))
+                    self.__slide.unif[48] = 0.0
+                    self.__slide.unif[49] = 0.0
 
-        self.__slide.draw()
-        self.__draw_overlay()
-        if self.clock_is_on:
-            self.__draw_clock()
+            if self.__kenburns and self.__alpha >= 1.0:
+                t_factor = time_delay - fade_time - self.__next_tm + tm
+                # add exponentially smoothed tweening in case of timing delays etc. to avoid 'jumps'
+                self.__slide.unif[48] = self.__slide.unif[48] * 0.95 + self.__xstep * t_factor * 0.05
+                self.__slide.unif[49] = self.__slide.unif[49] * 0.95 + self.__ystep * t_factor * 0.05
 
-        if self.__alpha >= 1.0 and tm < self.__name_tm:
-            # this sets alpha for the TextBlock from 0 to 1 then back to 0
-            if self.__show_text_tm > 0:
-                dt = 1.0 - (self.__name_tm - tm) / self.__show_text_tm
-            else:
-                dt = 1
-            if dt > 0.995:
-                dt = 1  # ensure that calculated alpha value fully reaches 0 (TODO: Improve!)
-            ramp_pt = max(4.0, self.__show_text_tm / 4.0)  # always > 4 so text fade will always < 4s
+            if self.__alpha < 1.0:  # transition is happening
+                self.__alpha += self.__delta_alpha
+                if self.__alpha > 1.0:
+                    self.__alpha = 1.0
+                self.__slide.unif[44] = self.__alpha * self.__alpha * (3.0 - 2.0 * self.__alpha)
+            if (self.__next_tm - tm) < 5.0 or self.__alpha < 1.0:
+                self.__in_transition = True  # set __in_transition True a few seconds *before* end of previous slide
+            else:  # no transition effect safe to update database, resuffle etc
+                self.__in_transition = False
+                if self.__video_path is not None and tm > self.__name_tm:
+                    # start video stream
+                    if self.__video_streamer is None or not self.__video_streamer.player_alive():
+                        self.__video_streamer = VideoStreamer(
+                            self.__display_x, self.__display_y,
+                            self.__display.width, self.__display.height,
+                            self.__video_path, fit_display=self.__video_fit_display
+                        )
+                    else:
+                        self.__video_streamer.play(self.__video_path)
+                    self.__video_path = None
 
-            # create single saw tooth over 0 to __show_text_tm
-            alpha = max(0.0, min(1.0, ramp_pt * (1.0 - abs(1.0 - 2.0 * dt))))  # function only run if image alpha is 1.0 so can use 1.0 - abs... # noqa: E501
+            loop_running = self.__display.loop_running()
+            skip_image = False  # can add possible reasons to skip image below here
+            self.__slide.draw()
+            self.__draw_overlay()
+            if self.clock_is_on:
+                self.__draw_clock()
 
-            # if we have text, set it's current alpha value to fade in/out
-            show_bkg = False
-            if self.__textblock:
-                self.__textblock.sprite.set_alpha(alpha)
-                if self.__text_bkg_hgt:
-                    show_bkg = True  
-            
-            if show_bkg:  # only draw background if text 
-                self.__text_bkg.set_alpha(alpha)
-                self.__text_bkg.draw()
+            if self.__alpha >= 1.0 and tm < self.__name_tm:
+                # this sets alpha for the TextBlock from 0 to 1 then back to 0
+                if self.__show_text_tm > 0:
+                    dt = 1.0 - (self.__name_tm - tm) / self.__show_text_tm
+                else:
+                    dt = 1
+                if dt > 0.995:
+                    dt = 1  # ensure that calculated alpha value fully reaches 0 (TODO: Improve!)
+                ramp_pt = max(4.0, self.__show_text_tm / 4.0)  # always > 4 so text fade will always < 4s
 
-            if self.__textblock is not None:
-                self.__textblock.sprite.draw()
-        return (loop_running, skip_image, video_playing)  # now returns tuple with skip image flag and video_time added
+                # create single saw tooth over 0 to __show_text_tm
+                alpha = max(0.0, min(1.0, ramp_pt * (1.0 - abs(1.0 - 2.0 * dt))))  # function only run if image alpha is 1.0 so can use 1.0 - abs... # noqa: E501
+
+                # if we have text, set it's current alpha value to fade in/out
+                show_bkg = False
+                if self.__textblock:
+                    self.__textblock.sprite.set_alpha(alpha)
+                    if self.__text_bkg_hgt:
+                        show_bkg = True  
+                
+                if show_bkg:  # only draw background if text 
+                    self.__text_bkg.set_alpha(alpha)
+                    self.__text_bkg.draw()
+
+                if self.__textblock is not None:
+                    self.__textblock.sprite.draw()
+        return (loop_running, False, video_playing)  # now returns tuple with skip image flag and video_time added 
+        
+
+
+
+    # #return (loop_running, skip_image, video_playing)  # now returns tuple with skip image flag and video_time added
     
     def stop_video(self):
         """

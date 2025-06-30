@@ -78,7 +78,7 @@ def heif_to_image(fname: str) -> Optional[Image.Image]:
             image = image.convert("RGB")
         return image
     except (OSError, IOError) as e:
-        logger = logging.getLogger("interface_http.heif_to_jpg")
+        logger = logging.getLogger(__name__)
         logger.warning("Failed attempt to convert %s due to %s \n** Have you installed pi_heif? **", fname, e)
         return None
 
@@ -254,7 +254,7 @@ class InterfaceHttp(HTTPServer):
         super(InterfaceHttp, self).__init__(("0.0.0.0", port), RequestHandler)
         # NB name mangling throws a spanner in the works here!!!!!
         # *no* __dunders
-        self._logger = logging.getLogger("simple_server.InterfaceHttp")
+        self._logger = logging.getLogger(__name__)
         self._logger.info("creating an instance of InterfaceHttp")
         self._controller = controller
         self._pic_dir = os.path.expanduser(pic_dir)

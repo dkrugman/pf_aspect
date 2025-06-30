@@ -8,7 +8,7 @@ URL = "https://nominatim.openstreetmap.org/reverse?format=geojson&lat={}&lon={}&
 
 class GeoReverse:
     def __init__(self, geo_key, zoom=18, key_list=None):
-        self.__logger = logging.getLogger("geo_reverse.GeoReverse")
+        self.__logger = logging.getLogger(__name__)
         self.__geo_key = geo_key
         self.__zoom = zoom
         self.__key_list = key_list
