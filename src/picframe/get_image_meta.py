@@ -4,19 +4,27 @@ from PIL.ExifTags import TAGS, GPSTAGS
 from fractions import Fraction
 
 try:
-    from pi_heif import register_heif_opener
+    import iptcinfo3
+    from iptcinfo3 import IPTCInfo
+    logging.getLogger("iptcinfo3").setLevel(logging.ERROR)                  # turn off useless log infos
+except ImportError:
+    iptcinfo3 = None
 
+try:
+    from pi_heif import register_heif_opener
     register_heif_opener()
 except ImportError:
     register_heif_opener = None
 
-
 class GetImageMeta:
-
+    """
+    Extracts image metadata (EXIF, GPS, IPTC, XMP) and dimensions from supported formats.
+    Provides access to parsed tags and image size for database insertion and display logic.
+    """
     def __init__(self, filename):
-        self.__logger = logging.getLogger("get_image_meta.GetImageMeta")
+        self.__logger = logging.getLogger(__name__)
         self.__tags = {}
-        self.__filename = filename  # in case no exif data in which case needed for size
+        self.__filename = filename                                          # in case no exif data in which case needed for size
         self.__image_width: int = 0
         self.__image_height: int = 0
         image = self.get_image_object(filename)
@@ -26,7 +34,8 @@ class GetImageMeta:
             self.__do_image_tags(exif)
             self.__do_exif_tags(exif)
             self.__do_geo_tags(exif)
-            self.__do_iptc_keywords()
+            if iptcinfo3:
+                self.__do_iptc_keywords()
             try:
                 xmp = image.getxmp()
                 if len(xmp) > 0:
@@ -38,7 +47,7 @@ class GetImageMeta:
     @property
     def size(self) -> tuple[int, int]:
         """Returns the (width, height) tuple of the image."""
-        return (self.__image_width, self.__image_height)
+        return self.__image_width, self.__image_height
 
     def __do_image_tags(self, exif):
         tags = {
@@ -87,12 +96,10 @@ class GetImageMeta:
 
     def __do_xmp_keywords(self, xmp):
         try:
-            # title
-            val = self.__find_xmp_key('Headline', xmp)
+            val = self.__find_xmp_key('Headline', xmp)                      # title
             if val and isinstance(val, str) and len(val) > 0:
                 self.__tags['IPTC Object Name'] = val
-            # caption
-            try:
+            try:                                                            # caption
                 val = self.__find_xmp_key('description', xmp)
                 if val:
                     val = val['Alt']['li']['text']
@@ -100,16 +107,12 @@ class GetImageMeta:
                         self.__tags['IPTC Caption/Abstract'] = val
             except KeyError:
                 pass
-            # tags
             try:
-                val = self.__find_xmp_key('subject', xmp)
+                val = self.__find_xmp_key('subject', xmp)                   # tags
                 if val:
                     val = val['Bag']['li']
                     if val and isinstance(val, list) and len(val) > 0:
-                        tags = ''
-                        for tag in val:
-                            tags += tag + ","
-                        self.__tags['IPTC Keywords'] = tags
+                        self.__tags['IPTC Keywords'] = ",".join(val)
             except KeyError:
                 pass
         except Exception as e:
@@ -117,24 +120,18 @@ class GetImageMeta:
 
     def __do_iptc_keywords(self):
         try:
-            from iptcinfo3 import IPTCInfo
-            iptcinfo_logger = logging.getLogger('iptcinfo')  # turn off useless log infos
-            iptcinfo_logger.setLevel(logging.ERROR)
             with open(self.__filename, 'rb') as fh:
-                iptc = IPTCInfo(fh, force=True, out_charset='utf-8')  # TODO put IPTC read in separate function
-                # tags
-                val = iptc['keywords']
+                iptc = IPTCInfo(fh, force=True, out_charset='utf-8')        # TODO put IPTC read in separate function
+                val = iptc['keywords']                                      # tags
                 if val is not None and len(val) > 0:
                     keywords = ''
                     for key in iptc['keywords']:
-                        keywords += key.decode('utf-8') + ','  # decode binary strings
+                        keywords += key.decode('utf-8') + ','               # decode binary strings
                     self.__tags['IPTC Keywords'] = keywords
-                # caption
-                val = iptc['caption/abstract']
-                if val is not None and len(val) > 0:
+                val = iptc['caption/abstract']                              # caption
+                if val is not None and len(val) > 0:                        # title
                     self.__tags['IPTC Caption/Abstract'] = iptc['caption/abstract'].decode('utf8')
-                # title
-                val = iptc['object name']
+                val = iptc['object name']                                   
                 if val is not None and len(val) > 0:
                     self.__tags['IPTC Object Name'] = iptc['object name'].decode('utf-8')
         except Exception as e:
@@ -142,10 +139,7 @@ class GetImageMeta:
                                   self.__filename, e)
 
     def has_exif(self):
-        if self.__tags == {}:
-            return False
-        else:
-            return True
+        return bool(self.__tags)
 
     def __get_if_exist(self, key):
         if key in self.__tags:
@@ -153,8 +147,12 @@ class GetImageMeta:
         return None
 
     def __convert_to_degrees(self, value):
-        (deg, min, sec) = value
-        return deg + (min / 60.0) + (sec / 3600.0)
+        try:
+            deg, min, sec = value
+            return deg + (min / 60.0) + (sec / 3600.0)
+        except Exception as e:
+                self.__logger.warning("Failed to convert GPS value: %s -> %s", value, e)
+                return None
 
     def get_location(self):
         gps = {"latitude": None, "longitude": None}
@@ -193,15 +191,13 @@ class GetImageMeta:
             return 1
 
     def get_exif(self, key):
-        try:
-            # ISO prior 2.2, ISOSpeedRatings 2.2, PhotographicSensitivity 2.3
+        try:                                                                # ISO prior 2.2, ISOSpeedRatings 2.2, PhotographicSensitivity 2.3
             iso_keys = ['EXIF ISOSpeedRatings', 'EXIF PhotographicSensitivity', 'EXIF ISO']
             if key in iso_keys:
                 for iso in iso_keys:
                     val = self.__get_if_exist(iso)
                     if val:
-                        # If ISO is returned as a tuple, take the first element
-                        if type(val) is tuple:
+                        if type(val) is tuple:                               # If ISO is returned as a tuple, take the first element
                             val = val[0]
                         break
             else:
@@ -231,11 +227,10 @@ class GetImageMeta:
     def get_image_object(fname):
         try:
             image = Image.open(fname)
-            if image.mode not in ("RGB", "RGBA"):  # mat system needs RGB or more
+            if image.mode not in ("RGB", "RGBA"):                           # mat system needs RGB or more
                 image = image.convert("RGB")
-        # raise # the system should be able to withstand files being moved etc without crashing
-        except Exception as e:
-            logger = logging.getLogger("get_image_meta.GetImageMeta")
+        except Exception as e:                                              # the system should be able to withstand files being moved etc without crashing
+            logger = logging.getLogger(__name__)
             logger.warning("Can't open file: \"%s\"", fname)
             logger.warning("Cause: %s", e)
             image = None

@@ -21,7 +21,7 @@ class MatImage:
                             'double_bevel',
                             'double_flat']
 
-        self.__logger = logging.getLogger("mat_image.MatImage")
+        self.__logger = logging.getLogger(__name__)
 
         self.auto_inner_mat_color = auto_inner_mat_color
         self.display_size = display_size

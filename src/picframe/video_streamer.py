@@ -42,7 +42,7 @@ _image_file_lock = threading.Lock()
 
 def get_video_info(video_path: str) -> VideoMetadata:
     """Retrieves metadata about the video file using FFprobe."""
-    logger = logging.getLogger("get_video_info")
+    logger = logging.getLogger(__name__)
     start_time = time.time()
     try:
         cmd = [
@@ -247,7 +247,7 @@ class VideoFrameExtractor:
         self.display_width = display_width
         self.display_height = display_height
         self.fit_display = fit_display
-        self.logger = logging.getLogger("VideoFrameExtractor")
+        self.logger = logging.getLogger(__name__)
 
     def _scale_frame(self, frame: Image.Image) -> Image.Image:
         """
@@ -458,7 +458,7 @@ class VideoFrameExtractor:
                     image = cast(Image.Image, Image.open(path))
                 return image
             except (OSError, IOError, ValueError) as e:
-                logging.getLogger("VideoFrameExtractor").warning("Could not load cached frame: %s", e)
+                logging.getLogger(__name__).warning("Could not load cached frame: %s", e)
         return None
 
 
@@ -470,7 +470,7 @@ class VideoStreamer:
 
     def __init__(self, x: int, y: int, w: int, h: int, video_path: Optional[str] = None,
                  fit_display: bool = False) -> None:
-        self.__logger = logging.getLogger("video_streamer")
+        self.__logger = logging.getLogger(__name__)
         self.__logger.debug("Initializing VideoStreamer")
 
         self._proc = None
