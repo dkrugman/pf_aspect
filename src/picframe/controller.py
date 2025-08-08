@@ -5,6 +5,7 @@ Controls image display, manages state, handles MQTT and HTTP interfaces.
 """
 
 import logging
+import sys
 import time
 import signal
 import ssl
@@ -13,6 +14,7 @@ from datetime import datetime
 from .async_timer import init_timer
 from picframe.interface_peripherals import InterfacePeripherals
 from picframe import import_photos
+from picframe import process_images
 
 def make_date(txt: str) -> float:
     try:
@@ -34,7 +36,7 @@ class Controller:
         self.__mqtt_config = model.get_mqtt_config()
         self.__time_delay = model.time_delay
         self.__import_interval = model.get_aspect_config()['import_interval']
-
+        self.__process_interval = model.get_aspect_config()['process_interval']
         self.__paused = False
         self.__force_navigate = False
         self.__date_from = make_date('1901/12/15')
@@ -62,7 +64,9 @@ class Controller:
             self.publish_state()
 
     async def next(self):
+        self.__logger.info("Timer fired: next() called")
         if self.paused:
+            self.__logger.info("Slideshow is paused, returning")
             return
 
         if self.__viewer.is_video_playing():
@@ -126,15 +130,17 @@ class Controller:
             self.__logger.exception(f"Import task failed: {e}")
 
     async def start(self):
-        signal.signal(signal.SIGINT, self.__signal_handler)
         self.__viewer.slideshow_start()
         self.__interface_peripherals = InterfacePeripherals(self.__model, self.__viewer, self)
         self._import_photos = import_photos.ImportPhotos(self.__model)
         self._import_task = asyncio.create_task(self.import_wrapper())
+        self._process_images = process_images.ProcessImages(self.__model)
 
         self.__timer = init_timer(self.__model)
+        self.__logger.info(f"Registering slideshow timer with interval: {self.__time_delay} seconds")
         self.__timer.register(self.next, interval=self.__time_delay, name='slideshow')
         self.__timer.register(self._import_photos.check_for_updates, interval=self.__import_interval, name='import')
+        self.__timer.register(self._process_images.process_images, interval=self.__process_interval, name='process_images')
         self.__timer.start()
 
         if self.__mqtt_config['use_mqtt']:
@@ -166,13 +172,19 @@ class Controller:
 
     def stop(self):
         self.keep_looping = False
+        if hasattr(self, '_import_task') and self._import_task:
+            self._import_task.cancel()
         self.__interface_peripherals.stop()
         if self.__interface_mqtt:
             self.__interface_mqtt.stop()
         if self.__interface_http:
             self.__interface_http.stop()
+        if self.__timer:
+            self.__timer.stop()
         self.__model.stop_image_cache()
         self.__viewer.slideshow_stop()
+        sys.stdout.write("\x1b[?7h")                                        # re-enable line wrapping
+
 
     def __signal_handler(self, sig, frame):
         msg = 'Ctrl-c pressed, stopping picframe...' if sig == signal.SIGINT else f'Signal {sig} received, stopping picframe...'

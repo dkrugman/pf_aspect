@@ -4,9 +4,10 @@ import time
 import logging
 import threading
 from picframe.get_image_meta import GetImageMeta
-from picframe.video_streamer import VIDEO_EXTENSIONS, get_video_info
+from picframe.video_streamer import VIDEO_EXTENSIONS
 from picframe.image_meta_utils import get_exif_info
-import picframe.schema as schema  # adjust import path as needed
+from picframe.video_meta_utils import get_video_metadata
+import picframe.schema as schema
 
 class ImageCache:
 
@@ -24,7 +25,7 @@ class ImageCache:
                      'IPTC Caption/Abstract': 'caption',
                      'IPTC Object Name': 'title'}
 
-    def __init__(self, picture_dir, follow_links, db_file, geo_reverse, update_interval):
+    def __init__(self, picture_dir, follow_links, db_file, geo_reverse, update_interval, square_img_setting='Landscape'):
         self.__logger = logging.getLogger(__name__)
         self.__logger.debug('Creating an instance of ImageCache')
 
@@ -34,13 +35,12 @@ class ImageCache:
         self.__geo_reverse = geo_reverse
         self.__update_interval = update_interval
 
-        self.__db = sqlite3.connect(self.__db_file, check_same_thread=False)
+        self.__db = sqlite3.connect(self.__db_file, check_same_thread=False, timeout=5.0)
         self.__db.row_factory = sqlite3.Row
-
-        if not self.__schema_exists_and_valid():
-            schema.create_schema(self.__db)
-
-        self.__db_write_lock = threading.Lock()
+        # Use WAL mode for better concurrency
+        self.__db.execute("PRAGMA journal_mode=WAL")
+        self.__db.execute("PRAGMA synchronous=NORMAL")
+        self.__db.execute("PRAGMA foreign_keys=ON")
 
         self.__modified_folders = []
         self.__modified_files = []
@@ -49,50 +49,53 @@ class ImageCache:
         self.__pause_looping = False
         self.__shutdown_completed = False
         self.__purge_files = False
+        self.__square_img_setting = square_img_setting
 
-        t = threading.Thread(target=self.__loop)
-        t.start()
+        if not self.__schema_exists_and_valid():
+            self.__logger.debug("Creating schema")
+            schema.create_schema(self.__db)
+            self.__logger.debug("Updating cache (add files on disk to DB)")
+            self.update_cache()
+
+        # t = threading.Thread(target=self.__loop)
+        # t.start()
 
     def __schema_exists_and_valid(self):
         """Check if db_info table exists and has a valid schema version."""
         try:
             cur = self.__db.cursor()
             cur.execute("""
-                SELECT name FROM sqlite_master
-                WHERE type='table' AND name='db_info'
+                SELECT schema_version FROM db_info
+                WHERE name = 'db_info'
             """)
-            if cur.fetchone() is None:
-                return False  # db_info table does not exist
-
-            cur.execute("SELECT schema_version FROM db_info")
             row = cur.fetchone()
-            if row and row[0] >= schema.REQUIRED_SCHEMA_VERSION:
-                return True
-            else:
-                return False  # outdated or missing version
-
+            return bool(row and row[0] >= schema.REQUIRED_SCHEMA_VERSION)
         except sqlite3.Error as e:
             self.__logger.warning(f"Schema check failed: {e}")
             return False
 
-    def __loop(self):
-        while self.__keep_looping:
-            if not self.__pause_looping:
-                self.update_cache()
-                time.sleep(self.__update_interval)
-            time.sleep(0.01)
-        with self.__db_write_lock:
-            self.__db.commit()
-            self.__db.close()
-        self.__shutdown_completed = True
+    # def __loop(self):
+    #     while self.__keep_looping:
+    #         if not self.__pause_looping:
+    #             self.update_cache()
+    #             time.sleep(self.__update_interval)
+    #         time.sleep(0.01)
+    #     with self.__db_write_lock:
+    #         self.__db.commit()
+    #         self.__db.close()
+    #     self.__shutdown_completed = True
 
     def pause_looping(self, value):
         self.__pause_looping = value
 
     def stop(self):
         self.__keep_looping = False
-        while not self.__shutdown_completed:
-            time.sleep(0.05)
+        # Since the background thread is commented out, we need to handle shutdown manually
+        try:
+            self.__db.close()
+        except Exception as e:
+            self.__logger.warning(f"Error closing database: {e}")
+        self.__shutdown_completed = True
 
     def purge_files(self):
         self.__purge_files = True
@@ -103,6 +106,7 @@ class ImageCache:
         if not self.__modified_files:
             self.__logger.debug('No unprocessed files in memory, checking disk')
             self.__modified_folders = self.__get_modified_folders()
+            self.__logger.debug(f"Modified folders: {self.__modified_folders}")
             self.__modified_files = self.__get_modified_files(self.__modified_folders)
             self.__logger.debug('Found %d new files on disk', len(self.__modified_files))
 
@@ -118,8 +122,7 @@ class ImageCache:
         if not self.__pause_looping:
             self.__purge_missing_files_and_folders()
 
-        with self.__db_write_lock:
-            self.__db.commit()
+        # No need for explicit commit with WAL mode and auto-commit
 
     def query_cache(self, where_clause, sort_clause='fname ASC'):
         cursor = self.__db.cursor()
@@ -127,6 +130,7 @@ class ImageCache:
         try:
             sql = f"SELECT file_id FROM all_data WHERE {where_clause} ORDER BY {sort_clause}"
             return cursor.execute(sql).fetchall()
+
         except Exception:
             return []
 
@@ -145,11 +149,14 @@ class ImageCache:
         if row and row['latitude'] and row['longitude'] and row['location'] is None:
             if self.__get_geo_location(row['latitude'], row['longitude']):
                 row = self.__db.execute(sql).fetchone()
-        with self.__db_write_lock:
-            self.__db.execute(
-                "UPDATE file SET displayed_count = displayed_count + 1, last_displayed = ? WHERE file_id = ?",
-                (time.time(), file_id)
-            )
+        try:
+            with self.__db:  # auto-commit
+                self.__db.execute(
+                    "UPDATE file SET displayed_count = displayed_count + 1, last_displayed = ? WHERE file_id = ?",
+                    (time.time(), file_id)
+                )
+        except Exception as e:
+            self.__logger.warning(f"Error updating file display count: {e}")
         return row
 
     def get_column_names(self):
@@ -164,15 +171,17 @@ class ImageCache:
         else:
             sql = "INSERT OR REPLACE INTO location (latitude, longitude, description) VALUES (?, ?, ?)"
             starttime = round(time.time() * 1000)
-            self.__db_write_lock.acquire()
-            waittime = round(time.time() * 1000)
-            self.__db.execute(sql, (lat, lon, location))
-            self.__db_write_lock.release()
-            now = round(time.time() * 1000)
-            self.__logger.debug(
-                'Update location: Wait for db %d ms and need %d ms for update ',
-                waittime - starttime, now - waittime)
-            return True
+            try:
+                with self.__db:  # auto-commit
+                    self.__db.execute(sql, (lat, lon, location))
+                now = round(time.time() * 1000)
+                self.__logger.debug(
+                    'Update location: took %d ms for update',
+                    now - starttime)
+                return True
+            except Exception as e:
+                self.__logger.warning(f"Error updating location: {e}")
+                return False
 
     # --- Returns a set of folders matching any of
     #     - Found on disk, but not currently in the 'folder' table
@@ -183,7 +192,7 @@ class ImageCache:
         out_of_date_folders = []
         sql_select = "SELECT * FROM folder WHERE name = ?"                      # Using picture_dir for orientation switching
         parent_dir = os.path.dirname(self.__picture_dir)                        # so it's set to ~/Pictures/Landscape or Portrait
-        allowed_subfolders = ["Landscape", "Portrait", "Square"]                # need to loiok under the parent directory,
+        allowed_subfolders = ["Landscape", "Portrait", "Square"]                # need to look under the parent directory,
                                                                                 # hardcoding names for now
         for subfolder in allowed_subfolders:
             dir_path = os.path.join(parent_dir, subfolder)
@@ -226,6 +235,10 @@ class ImageCache:
                         out_of_date_files.append(full_file)
         return out_of_date_files
 
+    def insert_file(self, file, file_id=None):
+        """Public method to insert a file into the database."""
+        return self.__insert_file(file, file_id)
+
     def __insert_file(self, file, file_id=None):
         file_insert = "INSERT OR REPLACE INTO file(folder_id, basename, extension, width, height, last_modified, source) VALUES((SELECT folder_id from folder where name = ?), ?, ?, ?, ?, ?, ?)"  # noqa: E501
         # file_update = "UPDATE file SET folder_id = (SELECT folder_id from folder where name = ?), basename = ?, extension = ?, last_modified = ?, source = ? WHERE file_id = ?"  # noqa: E501
@@ -249,22 +262,28 @@ class ImageCache:
         source = "ImageCache"
 
         # Insert this file's info into the folder, file, and meta tables
-        with self.__db_write_lock:
-            self.__db.execute(folder_insert, (dir,))
-            if file_id is None:
-                self.__db.execute(file_insert, (dir, base, extension.lstrip("."), width, height, mod_tm, source))
-            try:
-                self.__db.execute(meta_insert, vals)
-            except:
-                self.__logger.error(f"###FAILED meta_insert = {meta_insert}, vals = {vals}")
+        try:
+            with self.__db:  # auto-commit
+                self.__db.execute(folder_insert, (dir,))
+                if file_id is None:
+                    self.__db.execute(file_insert, (dir, base, extension.lstrip("."), width, height, mod_tm, source))
+                try:
+                    self.__db.execute(meta_insert, vals)
+                except Exception as e:
+                    self.__logger.error(f"###FAILED meta_insert = {meta_insert}, vals = {vals}, error: {e}")
+        except Exception as e:
+            self.__logger.warning(f"Error inserting file {file}: {e}")
 
     def __update_folder_info(self, folder_collection):
         update_data = []
         sql = "UPDATE folder SET last_modified = ? WHERE name = ?"
         for folder, modtime in folder_collection:
             update_data.append((modtime, folder))
-        with self.__db_write_lock:
-            self.__db.executemany(sql, update_data)
+        try:
+            with self.__db:  # auto-commit
+                self.__db.executemany(sql, update_data)
+        except Exception as e:
+            self.__logger.warning(f"Error updating folder info: {e}")
 
     def __get_meta_sql_from_dict(self, dict):
         columns = ', '.join(dict.keys())
@@ -281,11 +300,14 @@ class ImageCache:
         # Flag or delete any non-existent folders from the db. Note, deleting will automatically
         # remove orphaned records from the 'file' and 'meta' tables
         if len(folder_id_list):
-            with self.__db_write_lock:
-                if self.__purge_files:
-                    self.__db.executemany('DELETE FROM folder WHERE folder_id = ?', folder_id_list)
-                else:
-                    self.__logger.error(f"Folder in DB not found on disk. folder_id_list: {folder_id_list}")
+            try:
+                with self.__db:  # auto-commit
+                    if self.__purge_files:
+                        self.__db.executemany('DELETE FROM folder WHERE folder_id = ?', folder_id_list)
+                    else:
+                        self.__logger.error(f"Folder in DB not found on disk. folder_id_list: {folder_id_list}")
+            except Exception as e:
+                self.__logger.warning(f"Error purging folders: {e}")
 
         # Find files in the db that are no longer on disk
         if self.__purge_files:
@@ -297,62 +319,12 @@ class ImageCache:
             # Delete any non-existent files from the db. Note, this will automatically
             # remove matching records from the 'meta' table as well.
             if len(file_id_list):
-                with self.__db_write_lock:
-                    self.__db.executemany('DELETE FROM file WHERE file_id = ?', file_id_list)
+                try:
+                    with self.__db:  # auto-commit
+                        self.__db.executemany('DELETE FROM file WHERE file_id = ?', file_id_list)
+                except Exception as e:
+                    self.__logger.warning(f"Error purging files: {e}")
             self.__purge_files = False
-
-    def __get_video_info(self, file_path_name: str) -> dict:
-        """
-        Extracts metadata information from a video file.
-
-        This method retrieves video metadata using the `get_video_info` function and 
-        organizes it into a dictionary. The metadata includes dimensions, orientation, 
-        and other optional EXIF and IPTC data if available.
-
-        Args:
-            file_path_name (str): The full path to the video file.
-
-        Returns:
-            dict: A dictionary containing the meta keys.
-            Note, the 'key' must match a field in the 'meta' table
-        """
-        meta = get_video_info(file_path_name)
-
-        # Dict to store interesting EXIF data
-        # Note, the 'key' must match a field in the 'meta' table
-        e: dict = {}
-
-        # Orientation is set to 1 by default, as video files rarely have this info.
-        e['orientation'] = 1
-
-        width, height = meta.dimensions
-        e['width'] = width
-        e['height'] = height
-
-        # Attempt to retrieve additional metadata if available in meta
-        e['f_number'] = getattr(meta, 'f_number', None)
-        e['make'] = getattr(meta, 'make', None)
-        e['model'] = getattr(meta, 'model', None)
-        e['exposure_time'] = getattr(meta, 'exposure_time', None)
-        e['iso'] = getattr(meta, 'iso', None)
-        e['focal_length'] = getattr(meta, 'focal_length', None)
-        e['rating'] = getattr(meta, 'rating', None)
-        e['lens'] = getattr(meta, 'lens', None)
-        e['exif_datetime'] = meta.exif_datetime if meta.exif_datetime is not None else os.path.getmtime(file_path_name)
-
-        if meta.gps_coords is not None:
-            lat, lon = meta.gps_coords
-        else:
-            lat, lon = None, None
-        e['latitude'] = round(lat, 4) if lat is not None else lat  # TODO sqlite requires (None,) to insert NULL
-        e['longitude'] = round(lon, 4) if lon is not None else lon
-
-        # IPTC
-        e['tags'] = getattr(meta, 'tags', None)
-        e['title'] = getattr(meta, 'title', None)
-        e['caption'] = getattr(meta, 'caption', None)
-
-        return e
 
 # If being executed (instead of imported), kick it off...
 if __name__ == "__main__":

@@ -110,11 +110,13 @@ DEFAULT_CONFIG = {
     },
     'aspect': {
         'enable': True,                                  # Set to True for Aspect frames 
+        'frame_id': 'ASPECT_001',                        # unique id of the frame
         'import_dir': '~/picframe_data/imports',         # location for imported photos before processing
         'import_interval': 900,                          # secsonds between checks for updates from cloud default: 900 (15 min)
         'process_interval': 300,                         # secsonds between checks for files to process defsult: 300 (5 min)
         'min_rotation_interval': 30,                     # minimum time in seconds between rotations
-        'set_size': 10,                                  # number of images in each orientation  
+        'target_set_size': 10,                           # target number of images in each orientation  
+        'min_set_size': 3,                               # minimum number of images in each orientationgroup
         'width': 2894,                                   # width of the visible display in pixels
         'height': 2160,                                  # height of the visible display in pixels
         'sources': {
@@ -125,10 +127,9 @@ DEFAULT_CONFIG = {
         },
         'services': {
             'random_org': {
-                            'enable': True, 'api_url': 'https://api.random.org/json-rpc/4/invoke', 
-                            'api_key1': '6ce1241d-4e32-4e54-8c7a-02654e36f6fc', 'key1_name': 'aspect_dev1',
-                            'api_key2': '4403e4be-5ad6-48db-bfac-5b65e57c505a', 'key2_name': 'aspect_dev2',
-                            'api_key3': '168ae04d-1044-4eb5-8af8-8e89b70847cc', 'key3_name': 'aspect_dev3',
+                            'enable': True,
+                            'api_url': 'https://api.random.org/json-rpc/4/invoke', 
+                            'api_key': '6ce1241d-4e32-4e54-8c7a-02654e36f6fc', 'key1_name': 'aspect_dev1',
                             'daily_limit': 1000,         # requests per day
                             'rate_limit ': 10            # requests per second
             },
@@ -226,7 +227,8 @@ class Model:
                                                     model_config['follow_links'],
                                                     os.path.expanduser(model_config['db_file']),
                                                     self.__geo_reverse,
-                                                    model_config['update_interval'])
+                                                    model_config['update_interval'],
+                                                    aspect_config.get('square_img', 'Landscape'))
         self.__deleted_pictures = model_config['deleted_pictures']
         self.__no_files_img = os.path.expanduser(model_config['no_files_img'])
         self.__sort_cols = model_config['sort_cols']
@@ -238,10 +240,12 @@ class Model:
         if aspect_config['enable']:
             self.__logger.info("Aspect mode enabled")
             self.__aspect_enabled = True
+            self.__frame_id = aspect_config['frame_id']
             self.__import_interval = aspect_config['import_interval']
             self.__process_interval = aspect_config['process_interval']
             self.__min_rotation_interval = aspect_config['min_rotation_interval']
-            self.__set_size = aspect_config['set_size']
+            self.__target_set_size = aspect_config['target_set_size']
+            self.__min_set_size = aspect_config['min_set_size']
             self.__width = aspect_config['width']
             self.__height = aspect_config['height']
             self.__import_dir = os.path.expanduser(aspect_config['import_dir'])
@@ -275,7 +279,10 @@ class Model:
         return self.__config['peripherals']
     
     def get_aspect_config(self):
-        return self.__config.setdefault('aspect', {})
+        return self.__config['aspect']
+    
+    def get_image_cache(self):
+        return self.__image_cache
     
     @property
     def fade_time(self):

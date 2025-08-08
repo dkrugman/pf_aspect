@@ -119,6 +119,11 @@ class GetImageMeta:
             self.__logger.warning("xmp loading has failed: %s -> %s", self.__filename, e)
 
     def __do_iptc_keywords(self):
+        # Skip .jxl files as iptcinfo3 doesn't support them
+        if self.__filename.lower().endswith('.jxl'):
+            self.__logger.debug("Skipping IPTC processing for .jxl file: %s", self.__filename)
+            return
+            
         try:
             with open(self.__filename, 'rb') as fh:
                 iptc = IPTCInfo(fh, force=True, out_charset='utf-8')        # TODO put IPTC read in separate function

@@ -18,14 +18,14 @@ import re, sys, os, time, asyncio
 from picframe.start import main
 
 
-TRACING = False  # Set to False to disable tracing
+TRACING = True  # Set to False to disable tracing
 FUNC_COL_WIDTH = 32
 LOC_COL_WIDTH  = 28
 SUF_COL_WIDTH  = 42
 
 FILTER_PATH = "/home/pi/src/picframe/src/picframe"
 IGNORE_FUNCS = {
-    'paused', 'is_video_playing', '__draw_overlay', 'clock_is_on',
+    'flush', 'write', 'paused', 'is_video_playing', '__draw_overlay', 'clock_is_on',
     'slideshow_transition', '__update_pointer_position',
     '__pointer_moved', '__handle_touch_input',
     'menu_is_on', 'check_input', '<genexpr>', 'EXIF_TO_FIELD'
