@@ -149,6 +149,7 @@ peripherals:
 
 aspect:
   enable: True                            # default=True
+  frame_id: "ASPECT_001"                  # unique id of the frame
   import_dir: "~/Pictures/Imports"        # location for imported photos before processing
   import_interval: 900                    # secsonds between checks for updates from cloud default: 900 (15 min)
   process_interval: 300                   # secsonds between checks for files to process defsult: 300 (5 min)
@@ -157,7 +158,7 @@ aspect:
   target_set_size: 10                     # target number of images in each orientation  
   min_set_size: 3                         # minimum number of images in each orientation
   JPEG_XL: True                           # Use JPEG XL for image processing
-  square_img: "Landscape"                 # display mode for square images, "Landscape" or "Portrait"
+  square_img: "Landscape"                 # display mode for square images, "Landscape" (default) or "Portrait"
   width: 2894                             # width of the display in pixels
   height: 2160                            # height of the display in pixels
   sources:

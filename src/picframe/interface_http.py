@@ -36,7 +36,8 @@ EXTENSION_TO_MIMETYPE = {
     # Images
     '.jpg': 'image/jpeg',
     '.jpeg': 'image/jpeg',
-    '.png': 'image/png'
+    '.png': 'image/png',
+    '.jxl': 'image/jxl'
 }
 if register_heif_opener is not None:
     EXTENSIONS += [".heif", ".heic"]

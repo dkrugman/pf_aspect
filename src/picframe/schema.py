@@ -8,16 +8,18 @@ REQUIRED_SCHEMA_VERSION = 3
 
 def create_schema(db):
     """Creates or upgrades the database schema to REQUIRED_SCHEMA_VERSION."""
-
+    # Slideshow table is here because it is part of the schema, but always gets dropped and recreated
     sql_slideshow_table = """
         CREATE TABLE IF NOT EXISTS slideshow (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            file_id      INTEGER NOT NULL,
-            basename     TEXT NOT NULL,
-            extension    TEXT NOT NULL,
-            orientation  TEXT NOT NULL,
-            created      REAL DEFAULT 0 NOT NULL,
-            played       INTEGER DEFAULT 0 NOT NULL
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_num      INTEGER NOT NULL,
+            order_in_group INTEGER NOT NULL,
+            file_id        INTEGER NOT NULL,
+            basename       TEXT NOT NULL,
+            extension      TEXT NOT NULL,
+            orientation    TEXT NOT NULL,
+            created        REAL DEFAULT 0 NOT NULL,
+            played         INTEGER DEFAULT 0 NOT NULL
         )"""
 
     sql_imported_playlists_table = """

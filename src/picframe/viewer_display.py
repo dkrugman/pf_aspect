@@ -196,7 +196,7 @@ class ViewerDisplay:
         if pic is not None and paused is not None:  # text needs to be refreshed
             self.__make_text(pic, paused)
         self.__name_tm = max(self.__name_tm, time.time() + self.__show_text_tm)
-        self.__logger.debug("PIC: {pic} PAUSED: {paused} NAME_TM: {self.__name_tm} SHOW_TEXT_TM: {self.__show_text_tm}")
+        self.__logger.debug(f"PIC: {pic} PAUSED: {paused} NAME_TM: {self.__name_tm} SHOW_TEXT_TM: {self.__show_text_tm}")
 
     def set_brightness(self, val):
         self.__slide.unif[55] = val  # take immediate effect

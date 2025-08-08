@@ -5,27 +5,28 @@ Handles importing photos from third-party services to the local filesystem.
 Integrates with configured import sources (e.g. Nixplay) and maintains imported_playlists database table.
 """
 
+import asyncio
+import json
+import logging
 import os
+import re
+import shutil
+import sqlite3
 import sys
 import time
-import logging
 import warnings
-import json
-import re
-import pytz
-import ntplib
-import urllib3
-import requests
-import sqlite3
-import threading
-import asyncio
-import shutil
-from pathlib import Path
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from urllib.parse import urlencode, urlparse
+
+import ntplib
+import pytz
+import requests
+import urllib3
 from requests.exceptions import HTTPError
 
 from picframe.schema import create_schema
+from picframe.process_images import ProcessImages
 
 def extract_filename_and_ext(url_or_path):
     """
@@ -97,15 +98,21 @@ class ImportPhotos:
         self.__db_file = os.path.expanduser(model_config['db_file'])
         self.__import_dir = self.__model.get_aspect_config()["import_dir"]
         self._importing = False
-        self.__db = sqlite3.connect(self.__db_file, check_same_thread=False)
+        self.__db = sqlite3.connect(self.__db_file, check_same_thread=False, timeout=5.0)
+        # Use WAL mode for better concurrency
+        self.__db.execute("PRAGMA journal_mode=WAL")
+        self.__db.execute("PRAGMA synchronous=NORMAL")
+        self.__db.execute("PRAGMA foreign_keys=ON")
         create_schema(self.__db)
-        self.__db_write_lock = threading.Lock()                             # lock to serialize db writes between threads
- 
+
     async def check_for_updates(self) -> None:
         self._importing = True
         try:
             loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, self._check_for_updates_blocking)
+                # === Process images after importing ===
+            processor = ProcessImages(self.__model)
+            await processor.process_images()  
         finally:
             self._importing = False
 
@@ -141,37 +148,36 @@ class ImportPhotos:
 
     def update_imported_playlists_db(self, source, playlists):
         """Update the DB to match current playlists for a source."""
-        with self.__db_write_lock:
-            cur = self.__db.cursor()
-            
-            # Get existing playlists from DB for this source
-            cur.execute("SELECT playlist_id FROM imported_playlists WHERE source = ?", (source,))
-            existing_ids = set(row[0] for row in cur.fetchall())
+        try:
+            with self.__db:  # auto-commit
+                # Get existing playlists from DB for this source
+                cur = self.__db.execute("SELECT playlist_id FROM imported_playlists WHERE source = ?", (source,))
+                existing_ids = set(row[0] for row in cur.fetchall())
 
-            current_ids = set()
-            for plist in playlists:
-                pid = plist["id"]
-                pname = plist["playlist_name"]
-                picture_count = plist["picture_count"]
-                last_modified = plist["last_modified"]
-                last_imported = 0                                           # 0 will force all media to be checked
-                current_ids.add(pid)
-                self.__logger.info(f"playlist: {pname}")
-                # Insert or replace if updated
-                cur.execute("""
-                    INSERT INTO imported_playlists (source, playlist_name, playlist_id, picture_count, last_modified, last_imported)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(source, playlist_id) DO UPDATE SET
-                        playlist_name = excluded.playlist_name,
-                        last_modified = excluded.last_modified
-                """, (source, pname, pid, picture_count, unix_to_utc_string(last_modified), last_imported))
+                current_ids = set()
+                for plist in playlists:
+                    pid = plist["id"]
+                    pname = plist["playlist_name"]
+                    picture_count = plist["picture_count"]
+                    last_modified = plist["last_modified"]
+                    last_imported = 0  # 0 will force all media to be checked
+                    current_ids.add(pid)
+                    self.__logger.info(f"playlist: {pname}")
+                    # Insert or replace if updated
+                    self.__db.execute("""
+                        INSERT INTO imported_playlists (source, playlist_name, playlist_id, picture_count, last_modified, last_imported)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(source, playlist_id) DO UPDATE SET
+                            playlist_name = excluded.playlist_name,
+                            last_modified = excluded.last_modified
+                    """, (source, pname, pid, picture_count, unix_to_utc_string(last_modified), last_imported))
 
-            # Delete any playlists no longer present in source
-            stale_ids = existing_ids - current_ids
-            for pid in stale_ids:
-                cur.execute("DELETE FROM imported_playlists WHERE source = ? AND playlist_id = ?", (source, pid))
-            self.__db.commit()
-
+                # Delete any playlists no longer present in source
+                stale_ids = existing_ids - current_ids
+                for pid in stale_ids:
+                    self.__db.execute("DELETE FROM imported_playlists WHERE source = ? AND playlist_id = ?", (source, pid))
+        except Exception as e:
+            self.__logger.warning(f"Error updating imported playlists: {e}")
 
     def _check_for_updates_blocking(self):
         if not any(self.__sources[source]['enable'] for source in self.__sources):
@@ -185,13 +191,16 @@ class ImportPhotos:
             playlists = self.get_source_playlists(source)
             if playlists:
                 self.update_imported_playlists_db(source, playlists)
-                with self.__db_write_lock:                                  # Import media only for playlists with last_imported = 0
-                    cur = self.__db.cursor()
-                    cur.execute("""
-                        SELECT playlist_id, playlist_name FROM imported_playlists
-                        WHERE source = ? AND last_imported = 0
-                    """, (source,))
-                    to_import = cur.fetchall()
+                try:
+                    with self.__db:  # auto-commit
+                        cur = self.__db.execute("""
+                            SELECT playlist_id, playlist_name FROM imported_playlists
+                            WHERE source = ? AND last_imported = 0
+                        """, (source,))
+                        to_import = cur.fetchall()
+                except Exception as e:
+                    self.__logger.warning(f"Error querying unimported playlists: {e}")
+                    to_import = []
 
                 if not to_import:
                     self.__logger.info(f"No unimported playlists for source {source}")
@@ -217,13 +226,15 @@ class ImportPhotos:
 
                     self.save_downloaded_media(source, playlist_id, media_items)
                     
-                    with self.__db_write_lock:                              # Update last_imported timestamp
-                        cur.execute("""
-                            UPDATE imported_playlists SET last_imported = ?
-                            WHERE source = ? AND playlist_id = ?
-                        """, (unix_to_utc_string(int(time.time())), source, playlist_id))
-                        self.__db.commit()
-      
+                    try:
+                        with self.__db:  # auto-commit
+                            self.__db.execute("""
+                                UPDATE imported_playlists SET last_imported = ?
+                                WHERE source = ? AND playlist_id = ?
+                            """, (unix_to_utc_string(int(time.time())), source, playlist_id))
+                    except Exception as e:
+                        self.__logger.warning(f"Error updating last_imported timestamp: {e}")
+
     def create_nixplay_authorized_client(self, acct_id: str, acct_pwd: str, login_url: str):
         """Submits login form and returns valid session for Nixplay."""    
         data = {
@@ -340,55 +351,56 @@ class ImportPhotos:
         import_dir_path = Path(os.path.expanduser(self.__import_dir))
         import_dir_path.mkdir(parents=True, exist_ok=True)
 
-        with self.__db_write_lock:
-            cur = self.__db.cursor()
-            for item in media_items:
-                media_id = item.get("mediaItemId")
-                url = item.get("originalUrl")
-                nix_caption = item.get("caption")
-                timestamp = item.get("timestamp")
-                orig_filename = item.get("filename", None)
+        try:
+            with self.__db:  # auto-commit
+                for item in media_items:
+                    media_id = item.get("mediaItemId")
+                    url = item.get("originalUrl")
+                    nix_caption = item.get("caption")
+                    timestamp = item.get("timestamp")
+                    orig_filename = item.get("filename", None)
 
-                if not url:
-                    self.__logger.warning(f"No URL for mediaItemId {media_id}, skipping.")
-                    continue
+                    if not url:
+                        self.__logger.warning(f"No URL for mediaItemId {media_id}, skipping.")
+                        continue
 
-                basename, extension = extract_filename_and_ext(orig_filename or url)
+                    basename, extension = extract_filename_and_ext(orig_filename or url)
 
-                basename = f"{source}_{playlist_id}_{basename}"
-                full_name = f"{basename}.{extension}"
-                local_path = import_dir_path / full_name
+                    basename = f"{source}_{playlist_id}_{basename}"
+                    full_name = f"{basename}.{extension}"
+                    local_path = import_dir_path / full_name
 
-                # Download file
-                try:
-                    response = requests.get(url, stream=True, timeout=30)
-                    response.raise_for_status()
-                    with open(local_path, 'wb') as f:
-                        shutil.copyfileobj(response.raw, f)
-                    self.__logger.info(f"Downloaded {full_name}")
-                except Exception as e:
-                    self.__logger.error(f"Failed to download {url}: {e}")
-                    continue
+                    # Download file
+                    try:
+                        response = requests.get(url, stream=True, timeout=30)
+                        response.raise_for_status()
+                        with open(local_path, 'wb') as f:
+                            shutil.copyfileobj(response.raw, f)
+                        self.__logger.info(f"Downloaded {full_name}")
+                    except Exception as e:
+                        self.__logger.error(f"Failed to download {url}: {e}")
+                        continue
 
-                # Insert into database
-                cur.execute("""
-                    INSERT INTO imported_files (source, playlist_id, media_item_id, original_url, basename, extension,nix_caption, orig_extension, processed, orig_timestamp, last_modified)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    source,
-                    playlist_id,
-                    media_id,
-                    url,
-                    basename,
-                    extension,                                                    # may be changed to .jxl in later processing
-                    nix_caption,
-                    extension,                                                    # original extension same as stored
-                    0,
-                    unix_to_utc_string(timestamp),
-                    unix_to_utc_string(int(os.path.getmtime(local_path)))
-                ))
-
-            self.__db.commit()
+                    # Insert into database
+                    self.__logger.info(f"Inserting into database: source: {source}, playlist_id: {playlist_id}, media_item_id: {media_id}, original_url: {url}, basename: {basename}, extension: {extension}, nix_caption: {nix_caption}, orig_extension: {extension}, processed: 0, orig_timestamp: {timestamp}, last_modified: {unix_to_utc_string(int(os.path.getmtime(local_path)))}")
+                    self.__db.execute("""
+                        INSERT INTO imported_files (source, playlist_id, media_item_id, original_url, basename, extension,nix_caption, orig_extension, processed, orig_timestamp, last_modified)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        source,
+                        playlist_id,
+                        media_id,
+                        url,
+                        basename,
+                        extension,  # may be changed to .jpg in later processing
+                        nix_caption,
+                        extension,  # original extension same as stored
+                        0,
+                        unix_to_utc_string(timestamp),
+                        unix_to_utc_string(int(os.path.getmtime(local_path)))
+                    ))
+        except Exception as e:
+            self.__logger.warning(f"Error saving downloaded media: {e}")
 
 # CHECK OR CREATE SUBDIRECTORIES
 #     playlists_to_update = []

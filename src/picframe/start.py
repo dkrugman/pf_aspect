@@ -1,6 +1,7 @@
 import sys, os, logging, locale, argparse, asyncio
 from shutil import copytree
 from picframe import model, viewer_display, controller, __version__
+import signal
 
 PICFRAME_DATA_DIR = 'picframe_data'
 
@@ -74,6 +75,10 @@ async def main():
     logging.basicConfig(stream=sys.stdout, level=logging.INFO, format="%(asctime)s %(levelname)s [%(filename)s:%(lineno)d] %(message)s")
     logger = logging.getLogger(__name__)
     logger.info('starting %s', sys.argv)
+    # === Suppress logs from external libraries ===
+    for noisy_logger in ['pyvips', 'urllib3', 'PIL', 'chardet', 'requests', 'exifread', 'pi3d', 'pi3lib', 'iptcinfo3']:
+        logging.getLogger(noisy_logger).setLevel(logging.WARNING)
+    
     parser = argparse.ArgumentParser()
     group = parser.add_mutually_exclusive_group()
     group.add_argument("-i", "--initialize",
@@ -121,11 +126,24 @@ async def main():
     logger.info('-------------------> model initialized with config: %s', m.get_model_config())
     v = viewer_display.ViewerDisplay(m.get_viewer_config())
     c = controller.Controller(m, v)
+    
+    # Set up signal handlers for graceful shutdown
+    def signal_handler():
+        logger.info("Signal received, shutting down gracefully...")
+        c.keep_looping = False
+    
+    # Add signal handlers to the event loop
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, signal_handler)
+    
     await c.start()
     try:
-        while True:
-            await asyncio.sleep(3600)
+        while c.keep_looping:
+            await asyncio.sleep(1)
     except (KeyboardInterrupt, asyncio.CancelledError):
+        pass
+    finally:
         c.stop()
 
 if __name__ == "__main__":
