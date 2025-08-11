@@ -94,6 +94,7 @@ DEFAULT_CONFIG = {
         'use_http': False,
         'path': '~/picframe_data/html',
         'port': 9000,
+        'auto_restart_on_conflict': True,  # Automatically restart picframe when port conflicts with other picframe processes
         'use_ssl': False,
         'keyfile': "/path/to/key.pem",
         'certfile': "/path/to/fullchain.pem"
@@ -433,59 +434,71 @@ class Model:
             self.__file_index = 0                        # reset to zero if no files available
             self.__logger.warning("No files available, setting file index to 0") 
             
-    def get_next_file(self):                             # MAIN LOOP: keep getting next file  
+    def get_next_file(self):                             # MAIN LOOP: keep getting next file
         missing_images = 0
         self.__logger.debug("get_next_file called, number of files:  %s. File Index: %s", self.__number_of_files, self.__file_index)
-        while True:                                      # loop until we acquire a valid image set
-            pic = None
-            if self.__reload_files:                      # Reload the playlist if requested
-                self.__logger.debug("Reloading files from image cache")
-                for _i in range(5):                      # give image_cache chance on first load if a large directory
-                    self.__get_files()
-                    missing_images = 0
-                    if self.__number_of_files > 0:
-                        break
-                    time.sleep(0.5)
-
-            # If we don't have any files to show, prepare the "no images" image
-            # Also, set the reload_files flag so we'll check for new files on the next pass...
-            if self.__number_of_files == 0 or missing_images >= self.__number_of_files:
-                pic = Pic(self.__no_files_img, 0, 0)
-                self.__logger.warning("No Images. Reload requested")
-                self.__reload_files = True
-                break
-
-            # If we've displayed all images...
-            #   If it's time to shuffle, set a flag to do so
-            #   Loop back, which will reload and shuffle if necessary
-            if self.__file_index == self.__number_of_files:
-                self.__num_run_through += 1
-                if self.shuffle and self.__num_run_through >= self.get_model_config()['reshuffle_num']:
-                    self.__logger.info("Reshuffling files after {} runs through".format(self.__num_run_through))
-                    self.__reload_files = True
-                    self.__file_index = 0
-                    continue
-
-            file_id = self.__file_list[self.__file_index][0]   # Load the current image
-            self.__logger.debug("Loading file: %s", file_id)
-            pic_row = self.__image_cache.get_file_info(file_id)
-            self.__logger.debug("pic_row: %s", pic_row)
-            pic = Pic(**pic_row) if pic_row is not None else None
-            
-            if pic and not os.path.isfile(pic.fname):    # Verify the image actually exists on disk
+        # Check for active slideshow
+        if self.__image_cache._is_active_slideshow():
+            # Return next image from slideshow
+            return self.__image_cache.get_next_file_from_slideshow()
+            # Set played = 1 for this image
+            self.__image_cache.set_played_for_image(self.__current_pic.file_id)
+            # if no more images, create new slideshow
+            if self.__image_cache.get_next_file_from_slideshow() is None:
+                self.__image_cache.create_new_slideshow()
+        else:
+            # import new images, check for images on disk, images to process or wait
+            while True:                                      # loop until we acquire a valid image set
                 pic = None
-            
-            self.__file_index += 1                       # Increment the image index for next time
+                if self.__reload_files:                      # Reload the playlist if requested
+                    self.__logger.debug("Reloading files from image cache")
+                    for _i in range(5):                      # give image_cache chance on first load if a large directory
+                        self.__get_files()
+                        missing_images = 0
+                        if self.__number_of_files > 0:
+                            break
+                        time.sleep(0.5)
 
-            if pic:                                      # If pic is valid here, everything is OK. Break out of the loop and return the set
-                break
+                # If we don't have any files to show, prepare the "no images" image
+                # Also, set the reload_files flag so we'll check for new files on the next pass...
+                if self.__number_of_files == 0 or missing_images >= self.__number_of_files:
+                    pic = Pic(self.__no_files_img, 0, 0)
+                    self.__logger.warning("No Images. Reload requested")
+                    self.__reload_files = True
+                    break
 
-            # Here, pic is undefined. That's a problem. Loop back and get another image.
-            # Track the number of times we've looped back so we can abort if we don't have *any* images to display
-            missing_images += 1
+                # REPLACE FOLLOWING WITH CODE TO GENERATE A NEW SLIDESHOW
+                # If we've displayed all images...
+                #   If it's time to shuffle, set a flag to do so
+                #   Loop back, which will reload and shuffle if necessary
+                if self.__file_index == self.__number_of_files:
+                    self.__num_run_through += 1
+                    if self.shuffle and self.__num_run_through >= self.get_model_config()['reshuffle_num']:
+                        self.__logger.info("Reshuffling files after {} runs through".format(self.__num_run_through))
+                        self.__reload_files = True
+                        self.__file_index = 0
+                        continue
 
-        self.__current_pic = pic
-        return self.__current_pic
+                file_id = self.__file_list[self.__file_index][0]   # Load the current image
+                self.__logger.debug("Loading file: %s", file_id)
+                pic_row = self.__image_cache.get_file_info(file_id)
+                self.__logger.debug("pic_row: %s", pic_row)
+                pic = Pic(**pic_row) if pic_row is not None else None
+                
+                if pic and not os.path.isfile(pic.fname):    # Verify the image actually exists on disk
+                    pic = None
+                
+                self.__file_index += 1                       # Increment the image index for next time
+
+                if pic:                                      # If pic is valid here, everything is OK. Break out of the loop and return the set
+                    break
+
+                # Here, pic is undefined. That's a problem. Loop back and get another image.
+                # Track the number of times we've looped back so we can abort if we don't have *any* images to display
+                missing_images += 1
+
+            self.__current_pic = pic
+            return self.__current_pic
 
     def get_number_of_files(self):
         return sum(

@@ -31,8 +31,9 @@ class AsyncTimerManager:
         self._tasks = []
         self._running = False
         self._task = None  # Store the background task
-        self._db = sqlite3.connect(self.__db_file, check_same_thread=True, timeout=5.0)
-        self._db.execute("PRAGMA journal_mode=WAL")
+        self._db = sqlite3.connect(self.__db_file, check_same_thread=False, timeout=5.0)
+        # Use WAL mode for better concurrency, DELETE for compatibility with DB Browser for SQLite
+        self._db.execute("PRAGMA journal_mode=DELETE")
         self._db.execute("PRAGMA synchronous=NORMAL")
         self._db.execute("PRAGMA foreign_keys=ON")
         with self._db:
@@ -97,7 +98,7 @@ class AsyncTimerManager:
                         coros.append(self._run_task(task))
                     else:
                         time_until = task["interval"] - (now - task["last_run"])
-                        self.__logger.debug(f"Task '{task['name']}' not due yet (time_until: {time_until:.1f}s)")
+                        #self.__logger.debug(f"Task '{task['name']}' not due yet (time_until: {time_until:.1f}s)")
 
                 if coros:
                     self.__logger.info(f"Executing {len(coros)} timer tasks")

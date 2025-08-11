@@ -99,8 +99,8 @@ class ImportPhotos:
         self.__import_dir = self.__model.get_aspect_config()["import_dir"]
         self._importing = False
         self.__db = sqlite3.connect(self.__db_file, check_same_thread=False, timeout=5.0)
-        # Use WAL mode for better concurrency
-        self.__db.execute("PRAGMA journal_mode=WAL")
+        # Use WAL mode for better concurrency, DELETE for compatibility with DB Browser for SQLite
+        self.__db.execute("PRAGMA journal_mode=DELETE")
         self.__db.execute("PRAGMA synchronous=NORMAL")
         self.__db.execute("PRAGMA foreign_keys=ON")
         create_schema(self.__db)

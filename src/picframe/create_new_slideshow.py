@@ -38,12 +38,16 @@ class NewSlideshow:
             raise ValueError(f"Database file '{self.db_file}' does not exist.")
 
     def fetch_file_ids(self):
-        conn = sqlite3.connect(self.db_file, check_same_thread=True)
-        c = conn.cursor()
-        c.execute("SELECT file_id, folder_id FROM file ORDER BY file_id")
-        data = c.fetchall()
-        conn.close()
-        return data
+        try:
+            with sqlite3.connect(self.db_file, check_same_thread=False, timeout=5.0) as conn:
+                conn.row_factory = sqlite3.Row
+                c = conn.cursor()
+                c.execute("SELECT file_id, folder_id FROM file ORDER BY file_id")
+                data = c.fetchall()
+                return data
+        except Exception as e:
+            self.__logger.warning(f"Error fetching file IDs: {e}")
+            return []
 
     def fetch_random_sequence_fallback(self, n_total):
         indices = list(range(1, n_total + 1))
@@ -138,36 +142,62 @@ class NewSlideshow:
 
         return groups
 
-    def save_to_playlist(self, groups):
-        conn = sqlite3.connect(self.db_file, check_same_thread=True)
-        c = conn.cursor()
+    def save_to_slideshow(self, groups):
+        try:
+            with sqlite3.connect(self.db_file, check_same_thread=False, timeout=5.0) as conn:
+                conn.row_factory = sqlite3.Row
+                c = conn.cursor()
 
-        # Drop and recreate the slideshow table
-        c.execute("DROP TABLE IF EXISTS slideshow")
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS slideshow (
-                id             INTEGER PRIMARY KEY AUTOINCREMENT,
-                group_num      INTEGER NOT NULL,
-                group_type     TEXT NOT NULL,
-                order_in_group INTEGER NOT NULL,
-                file_id        INTEGER NOT NULL
-            )
-        """)
+                # Drop and recreate the slideshow table
+                c.execute("DROP TABLE IF EXISTS slideshow")
+                c.execute("""
+                    CREATE TABLE IF NOT EXISTS slideshow (
+                        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                        group_num      INTEGER NOT NULL,
+                        order_in_group INTEGER NOT NULL,
+                        file_id        INTEGER NOT NULL,
+                        basename       TEXT NOT NULL,
+                        extension      TEXT NOT NULL,
+                        orientation    TEXT NOT NULL,
+                        created        REAL DEFAULT 0 NOT NULL,
+                        played         INTEGER DEFAULT 0 NOT NULL
+                    )
+                """)
 
-        insert_data = []
-        for g_num, (g_type, ids) in enumerate(groups, start=1):
-            for order, file_id in enumerate(ids, start=1):
-                insert_data.append((g_num, g_type, order, file_id))
+                # Get file metadata for all file IDs
+                all_file_ids = []
+                for g_type, ids in groups:
+                    all_file_ids.extend(ids)
+                
+                # Fetch file metadata using row factory
+                c.execute("""
+                    SELECT f.file_id, f.basename, f.extension, f.width, f.height 
+                    FROM file f 
+                """.format(','.join('?' * len(all_file_ids))), all_file_ids)
+                
+                file_metadata = {row['file_id']: (row['basename'], row['extension'], row['width'], row['height']) for row in c.fetchall()}
 
-        c.executemany("INSERT INTO slideshow (group_num, group_type, order_in_group, file_id) VALUES (?, ?, ?, ?)", insert_data)
-        conn.commit()
-        conn.close()
+                insert_data = []
+                for g_num, (g_type, ids) in enumerate(groups, start=1):
+                    for order, file_id in enumerate(ids, start=1):
+                        if file_id in file_metadata:
+                            basename, extension, orientation = file_metadata[file_id]
+                            orientation_text = 'portrait' if orientation == 2 else 'landscape'
+                            insert_data.append((g_num, order, file_id, basename, extension, orientation_text, 0))
+
+                c.executemany("""
+                    INSERT INTO slideshow (group_num, order_in_group, file_id, basename, extension, orientation, played) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, insert_data)
+                # Auto-commit when exiting the with block
+        except Exception as e:
+            self.__logger.warning(f"Error saving playlist: {e}")
 
     def generate_slideshow(self):
         self.__logger.info("Loading image list from database...")
         file_data = self.fetch_file_ids()
-        file_ids = [fid for fid, _ in file_data]
-        folder_map = {fid: folder_id for fid, folder_id in file_data}
+        file_ids = [row['file_id'] for row in file_data]
+        folder_map = {row['file_id']: row['folder_id'] for row in file_data}
 
         if self.shuffle:
             self.__logger.info("Shuffling file order using Random.org...")
@@ -180,6 +210,6 @@ class NewSlideshow:
         groups = self.build_groups_dynamic(file_ids, folder_map)
 
         self.__logger.info("Writing playlist table...")
-        self.save_to_playlist(groups)
+        self.save_to_slideshow(groups)
 
         self.__logger.info(f"Done. Created {len(groups)} groups.")
