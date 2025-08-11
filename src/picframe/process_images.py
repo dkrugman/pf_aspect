@@ -46,22 +46,41 @@ class ProcessImages:
 
     # === Image processing ===
     def process_image(self, file):
-        scaled_file = self.classify_and_scale(file)
-        processed_file = self.smart_crop(scaled_file)
-        if processed_file is not None:
+        try:
+            scaled_file = self.classify_and_scale(file)
+            if scaled_file is None:
+                self.__logger.warning(f"Failed to classify and scale {file.name}")
+                return
+                
+            processed_file = self.smart_crop(scaled_file)
+            if processed_file is None:
+                self.__logger.warning(f"Failed to smart crop {file.name}")
+                return
+                
+            # Add to database
             try:
-                self.add_to_db(file)
-            #    file.unlink()
-             #   self.__logger.info(f"Deleted imported file: {file}")
+                self.add_to_db(processed_file)
+                self.__logger.info(f"Successfully processed {file.name}")
             except Exception as e:
-                self.__logger.error(f"Failed to add {file} to database: {e}")
-    
+                self.__logger.error(f"Failed to add {file.name} to database: {e}")
+                return
+                
+        except Exception as e:
+            self.__logger.error(f"Failed to process {file.name}: {e}")
+        finally:
+            # Always try to delete the original file, regardless of processing success
+            try:
+                file.unlink()
+                self.__logger.info(f"Deleted imported file: {file}")
+            except Exception as e:
+                self.__logger.error(f"Failed to delete {file}: {e}")
 
     def classify_and_scale(self, file):
         try:
             width, height = self.get_exif_corrected_dimensions(file)
             if width is None:
-                return
+                self.__logger.warning(f"Could not get dimensions for {file.name}")
+                return None
 
             # Classify + scale
             if width > height:
@@ -79,7 +98,7 @@ class ProcessImages:
             image = pyvips.Image.new_from_file(str(file), access="sequential")
             resized = image.resize(scale)
 
-            output_file = self.picture_dir / category / (file.stem + ".jpg")
+            output_file = self.picture_dir / category / file.name
             resized.write_to_file(str(output_file), Q=100 )
 
             # Calculate crop loss
@@ -102,11 +121,21 @@ class ProcessImages:
             return output_file
 
         except Exception as e:
-            logging.error(f"Failed: {file.name} ({e})")
+            self.__logger.error(f"Failed to classify and scale {file.name}: {e}")
+            return None
 
     def smart_crop(self, file):
-        logging.info(f"Smart cropping {file.name}")
-        return file
+        if file is None:
+            self.__logger.warning("smart_crop called with None file")
+            return None
+            
+        try:
+            self.__logger.info(f"Smart cropping {file.name}")
+            # Currently just returns the file, but could add actual cropping logic here
+            return file
+        except Exception as e:
+            self.__logger.error(f"Failed to smart crop {file.name}: {e}")
+            return None
 
     def add_to_db(self, file):
         self.__logger.info(f"Adding {file.name} to database")

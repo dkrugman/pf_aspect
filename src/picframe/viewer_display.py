@@ -104,6 +104,7 @@ class ViewerDisplay:
         self.__image_overlay = None
         self.__prev_overlay_time = None
         self.__video_streamer = None
+        self.__stopping = False  # flag to indicate slideshow should stop
         ImageFile.LOAD_TRUNCATED_IMAGES = True  # occasional damaged file hangs app
 
     @property
@@ -284,6 +285,11 @@ class ViewerDisplay:
         return (screen_aspect, image_aspect, diff_aspect)
 
     def __tex_load(self, pic, size=None):  # noqa: C901
+        # Check if slideshow should stop before loading image
+        if self.__stopping:
+            self.__logger.info("Image loading cancelled - stopping in progress")
+            return None
+        
         try:
             self.__logger.debug(f"loading image: {pic.fname}")
             if self.__mat_images and self.__matter is None:
@@ -507,6 +513,11 @@ class ViewerDisplay:
         Optional[tuple[pi3d.Texture, pi3d.Texture]]
             A tuple containing textures for the first and last frames, or None if loading fails.
         """
+        # Check if slideshow should stop before loading video frames
+        if self.__stopping:
+            self.__logger.info("Video frame loading cancelled - stopping in progress")
+            return None
+        
         try:
             self.__logger.debug("Loading video frames: %s", video_path)
             extractor = VideoFrameExtractor(
@@ -559,6 +570,11 @@ class ViewerDisplay:
             - Whether to skip the current image.
             - Whether a video is currently playing.
         """
+        # Check if slideshow should stop
+        if self.__stopping:
+            self.__logger.info("Slideshow transition cancelled - stopping in progress")
+            return (False, True, False)
+        
         loop_running = False
         if fade_time > time_delay:
             self.__logger.warning("Fade time %f is longer than time delay %f, setting fade time to half of display time", fade_time, time_delay)  # noqa: E501
@@ -566,6 +582,11 @@ class ViewerDisplay:
 
         end_time = time.time() + fade_time 
         while time.time() < end_time + .5:           
+            # Check if slideshow should stop during the loop
+            if self.__stopping:
+                self.__logger.info("Slideshow loop cancelled - stopping in progress")
+                return (False, True, False)
+            
             video_playing = False
             if self.is_video_playing():                # if video is playing, we are done here
                 self.pause_video(paused)
@@ -644,16 +665,21 @@ class ViewerDisplay:
             else:  # no transition effect safe to update database, resuffle etc
                 self.__in_transition = False
                 if self.__video_path is not None and tm > self.__name_tm:
-                    # start video stream
-                    if self.__video_streamer is None or not self.__video_streamer.player_alive():
-                        self.__video_streamer = VideoStreamer(
-                            self.__display_x, self.__display_y,
-                            self.__display.width, self.__display.height,
-                            self.__video_path, fit_display=self.__video_fit_display
-                        )
+                    # Check if slideshow should stop before starting video
+                    if self.__stopping:
+                        self.__logger.info("Video start cancelled - stopping in progress")
+                        self.__video_path = None
                     else:
-                        self.__video_streamer.play(self.__video_path)
-                    self.__video_path = None
+                        # start video stream
+                        if self.__video_streamer is None or not self.__video_streamer.player_alive():
+                            self.__video_streamer = VideoStreamer(
+                                self.__display_x, self.__display_y,
+                                self.__display.width, self.__display.height,
+                                self.__video_path, fit_display=self.__video_fit_display
+                            )
+                        else:
+                            self.__video_streamer.play(self.__video_path)
+                        self.__video_path = None
 
             loop_running = self.__display.loop_running()
             skip_image = False  # can add possible reasons to skip image below here
@@ -731,6 +757,10 @@ class ViewerDisplay:
             self.__video_streamer.pause(do_pause)
 
     def slideshow_stop(self):
+        self.__logger.info("Stopping slideshow...")
+        self.__stopping = True
         if self.__video_streamer is not None:
             self.__video_streamer.kill()
-        self.__display.destroy()
+        if self.__display is not None:
+            self.__display.destroy()
+        self.__logger.info("Slideshow stopped")

@@ -8,6 +8,7 @@ import json
 import threading
 import base64
 import io
+import socket
 from PIL import Image
 
 try:
@@ -82,6 +83,65 @@ def heif_to_image(fname: str) -> Optional[Image.Image]:
         logger = logging.getLogger(__name__)
         logger.warning("Failed attempt to convert %s due to %s \n** Have you installed pi_heif? **", fname, e)
         return None
+
+def is_port_available(port: int, host: str = "0.0.0.0") -> bool:
+    """
+    Check if a port is available for binding.
+    
+    Args:
+        port (int): The port number to check
+        host (str): The host address to check (default: "0.0.0.0")
+        
+    Returns:
+        bool: True if port is available, False otherwise
+    """
+    try:
+        # First try to bind to the port to see if it's available
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.bind((host, port))
+            return True
+    except OSError:
+        # Port is already in use
+        return False
+    except Exception:
+        # Other errors, assume port is not available
+        return False
+
+def check_picframe_processes():
+    """
+    Check if there are other picframe processes running.
+    
+    Returns:
+        list: List of PIDs of running picframe processes
+    """
+    import subprocess
+    try:
+        result = subprocess.run(['pgrep', '-f', 'picframe'], 
+                              capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            pids = result.stdout.strip().split('\n')
+            return [pid for pid in pids if pid]
+        return []
+    except Exception:
+        return []
+
+def find_available_port(start_port: int, max_attempts: int = 10) -> int:
+    """
+    Find an available port starting from start_port.
+    
+    Args:
+        start_port (int): The port to start searching from
+        max_attempts (int): Maximum number of ports to try
+        
+    Returns:
+        int: An available port, or start_port if none found
+    """
+    for i in range(max_attempts):
+        port = start_port + i
+        if is_port_available(port):
+            return port
+    return start_port  # Return original port if none available
 
 class RequestHandler(BaseHTTPRequestHandler):
 
@@ -241,26 +301,43 @@ class RequestHandler(BaseHTTPRequestHandler):
 
 
 class InterfaceHttp(HTTPServer):
-    def __init__(
-            self,
-            controller,
-            html_path,
-            pic_dir,
-            no_files_img,
-            port=9000,
-            auth=False,
-            username=None,
-            password=None,
-        ):
+    def __init__(self, controller, path, pic_dir, no_files_img, port, auth, username, password):
+        self._controller = controller
+        self._path = path
+        self._pic_dir = pic_dir
+        self._no_files_img = no_files_img
+        self._port = port
+        self._auth = auth
+        self._username = username
+        self._password = password
+        # Check if port is available before trying to bind
+        if not is_port_available(port):
+            # Check if there are other picframe processes running
+            other_pids = check_picframe_processes()
+            current_pid = os.getpid()
+            
+            if other_pids and any(pid != str(current_pid) for pid in other_pids):
+                error_msg = f"Port {port} is already in use by another picframe process (PIDs: {', '.join(other_pids)})."
+                error_msg += f"\nThis Raspberry Pi is dedicated to picframe, so only one instance should be running."
+                logger = logging.getLogger(__name__)
+                logger.error(error_msg)
+                raise OSError(f"[Errno 98] Address already in use: Port {port} is occupied by another picframe process. PIDs: {', '.join(other_pids)}")
+            else:
+                error_msg = f"Port {port} is already in use by an unknown process."
+                error_msg += f"\nSince this is a dedicated picframe device, this suggests a system issue."
+                logger = logging.getLogger(__name__)
+                logger.error(error_msg)
+                raise OSError(f"[Errno 98] Address already in use: Port {port} is occupied by an unknown process")
+        
         super(InterfaceHttp, self).__init__(("0.0.0.0", port), RequestHandler)
         # NB name mangling throws a spanner in the works here!!!!!
         # *no* __dunders
         self._logger = logging.getLogger(__name__)
-        self._logger.info("creating an instance of InterfaceHttp")
+        self._logger.info(f"creating an instance of InterfaceHttp on port {port}")
         self._controller = controller
         self._pic_dir = os.path.expanduser(pic_dir)
         self._no_files_img = os.path.expanduser(no_files_img)
-        self._html_path = os.path.expanduser(html_path)
+        self._html_path = os.path.expanduser(path)
         self._auth = None
         if auth:
             self._auth = base64.b64encode(f"{username}:{password}".encode()).decode()
@@ -270,6 +347,11 @@ class InterfaceHttp(HTTPServer):
                          if 'setter' in dir(getattr(controller_class, method))]
         t = threading.Thread(target=self.serve_forever)
         t.start()
+
+    @property
+    def port(self):
+        """Get the actual port being used by the HTTP server."""
+        return self.server_address[1]
 
     def stop(self):
         t = threading.Thread(target=self.shutdown, daemon=True)

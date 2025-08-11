@@ -15,6 +15,7 @@ from .async_timer import init_timer
 from picframe.interface_peripherals import InterfacePeripherals
 from picframe import import_photos
 from picframe import process_images
+import os
 
 def make_date(txt: str) -> float:
     try:
@@ -130,6 +131,9 @@ class Controller:
             self.__logger.exception(f"Import task failed: {e}")
 
     async def start(self):
+        # Check for other picframe processes before starting
+        self._check_for_duplicate_picframe()
+        
         self.__viewer.slideshow_start()
         self.__interface_peripherals = InterfacePeripherals(self.__model, self.__viewer, self)
         self._import_photos = import_photos.ImportPhotos(self.__model)
@@ -153,37 +157,169 @@ class Controller:
         if self.__http_config['use_http']:
             from picframe import interface_http
             model_config = self.__model.get_model_config()
-            self.__interface_http = interface_http.InterfaceHttp(
-                self,
-                self.__http_config['path'],
-                model_config['pic_dir'],
-                model_config['no_files_img'],
-                self.__http_config['port'],
-                self.__http_config['auth'],
-                self.__http_config['username'],
-                self.__http_config['password'],
-            )
-            if self.__http_config['use_ssl']:
-                self.__interface_http.socket = ssl.wrap_socket(
-                    self.__interface_http.socket,
-                    keyfile=self.__http_config['keyfile'],
-                    certfile=self.__http_config['certfile'],
-                    server_side=True)
+            try:
+                self.__interface_http = interface_http.InterfaceHttp(
+                    self,
+                    self.__http_config['path'],
+                    model_config['pic_dir'],
+                    model_config['no_files_img'],
+                    self.__http_config['port'],
+                    self.__http_config['auth'],
+                    self.__http_config['username'],
+                    self.__http_config['password'],
+                )
+                if self.__http_config['use_ssl']:
+                    self.__interface_http.socket = ssl.wrap_socket(
+                        self.__interface_http.socket,
+                        keyfile=self.__http_config['keyfile'],
+                        certfile=self.__http_config['certfile'],
+                        server_side=True)
+            except OSError as e:
+                if "Address already in use" in str(e):
+                    self.__logger.error(f"HTTP interface cannot start: Port {self.__http_config['port']} is already in use.")
+                    
+                    # Check if this is another picframe process
+                    if "picframe process" in str(e):
+                        if self.__http_config.get('auto_restart_on_conflict', True):
+                            self.__logger.warning("Detected another picframe process running. Automatically restarting to resolve the conflict...")
+                            self.__interface_http = None
+                            # Schedule automatic restart
+                            asyncio.create_task(self._auto_restart())
+                        else:
+                            self.__logger.error("Port conflict detected but auto-restart is disabled. Continuing without HTTP interface.")
+                            self.__interface_http = None
+                    else:
+                        self.__logger.error("Port is occupied by an unknown process. Continuing without HTTP interface.")
+                        self.__interface_http = None
+                else:
+                    self.__logger.error(f"HTTP interface failed to start: {e}. Continuing without HTTP interface.")
+                    self.__interface_http = None
+            except Exception as e:
+                self.__logger.error(f"Can't initialize HTTP interface: {e}. Continuing without HTTP interface.")
+                self.__interface_http = None
+
+    def _check_for_duplicate_picframe(self):
+        """Check if there are other picframe processes running and provide guidance."""
+        other_pids = self._get_other_picframe_pids()
+        
+        if other_pids:
+            self.__logger.warning(f"Found other picframe processes running: PIDs {', '.join(other_pids)}")
+            self.__logger.warning("This Raspberry Pi is dedicated to picframe, so only one instance should be running.")
+            self.__logger.warning("Consider stopping the other processes or restarting the system.")
+        else:
+            self.__logger.debug("No other picframe processes detected.")
+
+    def _get_other_picframe_pids(self):
+        """Get list of other picframe process PIDs (excluding current process)."""
+        import subprocess
+        try:
+            result = subprocess.run(['pgrep', '-f', 'picframe'], 
+                                  capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                pids = result.stdout.strip().split('\n')
+                current_pid = os.getpid()
+                # Filter out empty strings and the current process
+                other_pids = [pid for pid in pids if pid and pid.strip() and pid != str(current_pid)]
+                return other_pids
+            return []
+        except Exception as e:
+            self.__logger.debug(f"Could not check for other picframe processes: {e}")
+            return []
+
+    async def _auto_restart(self):
+        """Automatically restart picframe to resolve port conflicts."""
+        import subprocess
+        import sys
+        import os
+        
+        self.__logger.info("Initiating automatic picframe restart...")
+        
+        try:
+            # Get the current script path and arguments
+            script_path = sys.argv[0] if hasattr(sys, 'argv') and sys.argv else None
+            
+            if script_path and os.path.exists(script_path):
+                self.__logger.info("Replacing current process with new picframe instance...")
+                
+                # Use exec to replace the current process instead of starting a new one
+                # This ensures only one process exists at a time
+                restart_cmd = [sys.executable, script_path] + sys.argv[1:]
+                
+                # Replace the current process with the new one
+                os.execv(sys.executable, restart_cmd)
+                # Note: execv never returns if successful
+            else:
+                self.__logger.error("Could not determine script path for restart. Please restart manually.")
+                
+        except Exception as e:
+            self.__logger.error(f"Automatic restart failed: {e}. Please restart manually.")
+            # Continue running without HTTP interface rather than crashing
 
     def stop(self):
+        self.__logger.info("Stopping picframe controller...")
         self.keep_looping = False
+        
+        # Cancel the import task if it exists
         if hasattr(self, '_import_task') and self._import_task:
-            self._import_task.cancel()
-        self.__interface_peripherals.stop()
-        if self.__interface_mqtt:
-            self.__interface_mqtt.stop()
-        if self.__interface_http:
-            self.__interface_http.stop()
-        if self.__timer:
-            self.__timer.stop()
-        self.__model.stop_image_cache()
-        self.__viewer.slideshow_stop()
-        sys.stdout.write("\x1b[?7h")                                        # re-enable line wrapping
+            self.__logger.info("Cancelling import task...")
+            try:
+                self._import_task.cancel()
+            except Exception as e:
+                self.__logger.error(f"Error cancelling import task: {e}")
+        
+        # Stop peripheral interface if it exists
+        if hasattr(self, '__interface_peripherals') and self.__interface_peripherals:
+            self.__logger.info("Stopping peripheral interface...")
+            try:
+                self.__interface_peripherals.stop()
+            except Exception as e:
+                self.__logger.error(f"Error stopping peripheral interface: {e}")
+        
+        # Stop MQTT interface if it exists
+        if hasattr(self, '__interface_mqtt') and self.__interface_mqtt:
+            self.__logger.info("Stopping MQTT interface...")
+            try:
+                self.__interface_mqtt.stop()
+            except Exception as e:
+                self.__logger.error(f"Error stopping MQTT interface: {e}")
+        
+        # Stop HTTP interface if it exists
+        if hasattr(self, '__interface_http') and self.__interface_http:
+            self.__logger.info("Stopping HTTP interface...")
+            try:
+                self.__interface_http.stop()
+            except Exception as e:
+                self.__logger.error(f"Error stopping HTTP interface: {e}")
+        
+        # Stop timer if it exists
+        if hasattr(self, '__timer') and self.__timer:
+            self.__logger.info("Stopping timer...")
+            try:
+                self.__timer.stop()
+            except Exception as e:
+                self.__logger.error(f"Error stopping timer: {e}")
+        
+        # Stop model components
+        try:
+            self.__logger.info("Stopping image cache...")
+            self.__model.stop_image_cache()
+        except Exception as e:
+            self.__logger.error(f"Error stopping image cache: {e}")
+        
+        # Stop slideshow
+        try:
+            self.__logger.info("Stopping slideshow...")
+            self.__viewer.slideshow_stop()
+        except Exception as e:
+            self.__logger.error(f"Error stopping slideshow: {e}")
+        
+        # Re-enable cursor visibility
+        try:
+            sys.stdout.write("\x1b[?7h")
+        except Exception as e:
+            self.__logger.error(f"Error re-enabling cursor: {e}")
+        
+        self.__logger.info("Picframe controller stopped successfully")
 
 
     def __signal_handler(self, sig, frame):

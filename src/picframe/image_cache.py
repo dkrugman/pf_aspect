@@ -37,8 +37,8 @@ class ImageCache:
 
         self.__db = sqlite3.connect(self.__db_file, check_same_thread=False, timeout=5.0)
         self.__db.row_factory = sqlite3.Row
-        # Use WAL mode for better concurrency
-        self.__db.execute("PRAGMA journal_mode=WAL")
+        # Use WAL mode for better concurrency, DELETE for compatibility with DB Browser for SQLite
+        self.__db.execute("PRAGMA journal_mode=DELETE")
         self.__db.execute("PRAGMA synchronous=NORMAL")
         self.__db.execute("PRAGMA foreign_keys=ON")
 
@@ -57,9 +57,6 @@ class ImageCache:
             self.__logger.debug("Updating cache (add files on disk to DB)")
             self.update_cache()
 
-        # t = threading.Thread(target=self.__loop)
-        # t.start()
-
     def __schema_exists_and_valid(self):
         """Check if db_info table exists and has a valid schema version."""
         try:
@@ -74,16 +71,70 @@ class ImageCache:
             self.__logger.warning(f"Schema check failed: {e}")
             return False
 
-    # def __loop(self):
-    #     while self.__keep_looping:
-    #         if not self.__pause_looping:
-    #             self.update_cache()
-    #             time.sleep(self.__update_interval)
-    #         time.sleep(0.01)
-    #     with self.__db_write_lock:
-    #         self.__db.commit()
-    #         self.__db.close()
-    #     self.__shutdown_completed = True
+    def _is_active_slideshow(self):
+        """Check if there's an active slideshow by checking if the slideshow table has any rows with played = 0."""
+        try:
+            cur = self.__db.cursor()
+            cur.execute("SELECT COUNT(*) FROM slideshow WHERE played = 0")
+            row = cur.fetchone()
+            count = row[0] if row else 0
+            self.__active_slideshow = count > 0
+            return self.__active_slideshow
+        except Exception as e:
+            self.__logger.warning(f"Error checking slideshow status: {e}")
+            return False
+
+    def get_next_file_from_slideshow(self):
+        """Get the next file from the slideshow."""
+        cur = self.__db.cursor()
+        cur.execute("SELECT file_id FROM slideshow WHERE played = 0 ORDER BY group_num ASC, order_in_group ASC LIMIT 1")
+        row = cur.fetchone()
+        return row[0] if row else None
+        
+    def set_played_for_image(self, file_id):
+        """Set played = 1 for the given file_id."""
+        cur = self.__db.cursor()
+        cur.execute("UPDATE slideshow SET played = 1 WHERE file_id = ?", (file_id,))
+        self.__db.commit()
+
+    def create_new_slideshow(self):
+        """Create a new slideshow using the NewSlideshow class."""
+        try:
+            from picframe.create_new_slideshow import NewSlideshow
+            # We need to pass a model instance, but ImageCache doesn't have direct access to it
+            # For now, we'll create a simple slideshow without the full NewSlideshow functionality
+            self.__logger.info("Creating new slideshow...")
+            
+            # Get all available file IDs with their metadata
+            cur = self.__db.cursor()
+            cur.execute("""
+                SELECT f.file_id, f.basename, f.extension, m.orientation 
+                FROM file f 
+                LEFT JOIN meta m ON f.file_id = m.file_id 
+                ORDER BY RANDOM() LIMIT 50
+            """)
+            rows = cur.fetchall()
+            
+            if not rows:
+                self.__logger.warning("No files available for slideshow")
+                return
+            
+            # Clear existing slideshow
+            cur.execute("DELETE FROM slideshow")
+            
+            # Insert new slideshow entries with proper schema
+            for i, row in enumerate(rows, 1):
+                orientation_text = 'portrait' if row['orientation'] == 2 else 'landscape'
+                cur.execute("""
+                    INSERT INTO slideshow (group_num, order_in_group, file_id, basename, extension, orientation, played) 
+                    VALUES (?, ?, ?, ?, ?, ?, 0)
+                """, (1, i, row['file_id'], row['basename'], row['extension'], orientation_text))
+            
+            self.__db.commit()
+            self.__logger.info(f"Created new slideshow with {len(rows)} images")
+            
+        except Exception as e:
+            self.__logger.warning(f"Error creating new slideshow: {e}")
 
     def pause_looping(self, value):
         self.__pause_looping = value
@@ -122,7 +173,7 @@ class ImageCache:
         if not self.__pause_looping:
             self.__purge_missing_files_and_folders()
 
-        # No need for explicit commit with WAL mode and auto-commit
+
 
     def query_cache(self, where_clause, sort_clause='fname ASC'):
         cursor = self.__db.cursor()
