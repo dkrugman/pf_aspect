@@ -3,6 +3,14 @@ from shutil import copytree
 from picframe import model, viewer_display, controller, __version__
 import signal
 
+# Import crash investigator
+try:
+    from picframe.crash_investigator import install_crash_handlers
+    CRASH_INVESTIGATION_AVAILABLE = True
+except ImportError:
+    CRASH_INVESTIGATION_AVAILABLE = False
+    print("Warning: Crash investigation module not available. Install psutil for enhanced crash detection.")
+
 PICFRAME_DATA_DIR = 'picframe_data'
 
 def copy_files(pkgdir, dest, target):
@@ -75,6 +83,17 @@ async def main():
     logging.basicConfig(stream=sys.stdout, level=logging.INFO, format="%(asctime)s %(levelname)s [%(filename)s:%(lineno)d] %(message)s")
     logger = logging.getLogger(__name__)
     logger.info('starting %s', sys.argv)
+    
+    # Initialize crash investigation if available
+    if CRASH_INVESTIGATION_AVAILABLE:
+        try:
+            crash_investigator = install_crash_handlers()
+            logger.info('Crash investigation enabled')
+        except Exception as e:
+            logger.warning('Failed to initialize crash investigation: %s', e)
+    else:
+        logger.info('Crash investigation not available - install psutil for enhanced crash detection')
+    
     # === Suppress logs from external libraries ===
     for noisy_logger in ['pyvips', 'urllib3', 'PIL', 'chardet', 'requests', 'exifread', 'pi3d', 'pi3lib', 'iptcinfo']:
         logging.getLogger(noisy_logger).setLevel(logging.WARNING)
@@ -134,17 +153,10 @@ async def main():
         # Call controller.stop() to ensure proper cleanup
         c.stop()
     
-    # Also set up traditional signal handlers as backup
-    def traditional_signal_handler(sig, frame):
-        logger.info(f"Traditional signal handler received signal {sig}")
-        signal_handler()
-    
     # Add signal handlers to the event loop
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, signal_handler)
-        # Also set traditional signal handlers as backup
-        signal.signal(sig, traditional_signal_handler)
     
     await c.start()
     try:
