@@ -63,7 +63,6 @@ class ImageCache:
             cur = self.__db.cursor()
             cur.execute("""
                 SELECT schema_version FROM db_info
-                WHERE name = 'db_info'
             """)
             row = cur.fetchone()
             return bool(row and row[0] >= schema.REQUIRED_SCHEMA_VERSION)

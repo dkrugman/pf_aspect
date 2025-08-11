@@ -137,7 +137,7 @@ class Controller:
         self.__viewer.slideshow_start()
         self.__interface_peripherals = InterfacePeripherals(self.__model, self.__viewer, self)
         self._import_photos = import_photos.ImportPhotos(self.__model)
-        self._import_task = asyncio.create_task(self.import_wrapper())
+        # Remove immediate import task - timer will handle initial import
         self._process_images = process_images.ProcessImages(self.__model)
 
         self.__timer = init_timer(self.__model)
@@ -213,13 +213,44 @@ class Controller:
         """Get list of other picframe process PIDs (excluding current process)."""
         import subprocess
         try:
+            # Get all processes with picframe in command line
             result = subprocess.run(['pgrep', '-f', 'picframe'], 
                                   capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
                 pids = result.stdout.strip().split('\n')
                 current_pid = os.getpid()
-                # Filter out empty strings and the current process
-                other_pids = [pid for pid in pids if pid and pid.strip() and pid != str(current_pid)]
+                other_pids = []
+                
+                for pid in pids:
+                    if not pid or not pid.strip() or pid == str(current_pid):
+                        continue
+                        
+                    # Get the full command line for this process
+                    try:
+                        cmd_result = subprocess.run(['ps', '-p', pid, '-o', 'args='], 
+                                                 capture_output=True, text=True, timeout=2)
+                        if cmd_result.returncode == 0:
+                            cmd_line = cmd_result.stdout.strip()
+                            
+                            # Exclude:
+                            # 1. Python picframe processes
+                            # 2. TCL unbuffer processes
+                            # 3. Subprocess.run processes for checking running processes (ps, pgrep)
+                            exclude = (
+                                ('python' in cmd_line and 'picframe' in cmd_line) or
+                                # TCL unbuffer processes
+                                ('tcl' in cmd_line and 'unbuffer' in cmd_line and 'picframe' in cmd_line) or
+                                ('pgrep' in cmd_line and 'picframe' in cmd_line) or
+                                ('ps' in cmd_line and '-p' in cmd_line and 'args=' in cmd_line)
+                            )
+                            
+                            if not exclude:
+                                other_pids.append(pid)
+                                
+                    except Exception:
+                        # If we can't get command line, skip this process
+                        continue
+                        
                 return other_pids
             return []
         except Exception as e:
@@ -259,13 +290,7 @@ class Controller:
         self.__logger.info("Stopping picframe controller...")
         self.keep_looping = False
         
-        # Cancel the import task if it exists
-        if hasattr(self, '_import_task') and self._import_task:
-            self.__logger.info("Cancelling import task...")
-            try:
-                self._import_task.cancel()
-            except Exception as e:
-                self.__logger.error(f"Error cancelling import task: {e}")
+        # Import task is now handled by timer, no need to cancel separately
         
         # Stop peripheral interface if it exists
         if hasattr(self, '__interface_peripherals') and self.__interface_peripherals:
