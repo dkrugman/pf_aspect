@@ -4,4 +4,4 @@ export DISPLAY=:0
 export XAUTHORITY=/home/pi/.Xauthority
 [ -f /home/pi/trace.log ] && rm /home/pi/trace.log
 LOGFILE="trace.log"
-unbuffer ~/src/picframe/src/picframe/scripts/picframe | tee $LOGFILE &
+unbuffer ~/pf_aspect/src/picframe/scripts/picframe | tee $LOGFILE &
