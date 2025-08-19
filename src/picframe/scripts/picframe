@@ -15,15 +15,23 @@ Usage:
 """
 
 import re, sys, os, time, asyncio
+
+# Ensure project root (parent of package `picframe`) is on sys.path
+_CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+_PACKAGE_PARENT = os.path.abspath(os.path.join(_CURRENT_DIR, "..", ".."))
+if _PACKAGE_PARENT not in sys.path:
+    sys.path.insert(0, _PACKAGE_PARENT)
+
 from picframe.start import main
 
 
-TRACING = False  # Set to False to disable tracing
+TRACING = True  # Set to False to disable tracing
 FUNC_COL_WIDTH = 32
 LOC_COL_WIDTH  = 28
 SUF_COL_WIDTH  = 42
 
-FILTER_PATH = "/home/pi/src/picframe/src/picframe"
+# Restrict tracing to files within the `picframe` package directory
+FILTER_PATH = os.path.abspath(os.path.join(_CURRENT_DIR, ".."))
 IGNORE_FUNCS = {
     'flush', 'write', 'paused', 'is_video_playing', '__draw_overlay', 'clock_is_on',
     'slideshow_transition', '__update_pointer_position',
