@@ -12,4 +12,4 @@ fi
 [ -f /home/pi/trace.log ] && rm /home/pi/trace.log
 LOGFILE="trace.log"
 # Use unbuffer for proper process tracing output
-unbuffer ~/src/picframe/src/picframe/scripts/picframe | tee $LOGFILE &
+unbuffer ~/pf_aspect/src/picframe/scripts/picframe | tee $LOGFILE &
