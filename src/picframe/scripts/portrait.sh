@@ -44,4 +44,4 @@ export XAUTHORITY=/home/pi/.Xauthority
 
 # Logging start
 LOGFILE="trace.log"
-unbuffer ~/src/picframe/src/picframe/scripts/picframe | tee $LOGFILE &
+unbuffer ~/pf_aspect/src/picframe/scripts/picframe | tee $LOGFILE &
