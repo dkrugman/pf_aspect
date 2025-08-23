@@ -16,21 +16,21 @@ class NewSlideshow:
         self.__logger = logging.getLogger(__name__)
         self.model = model
 
-        aspect_conf = model.aspect_config()
-        services_conf = aspect_conf['services']['random_org']
+        aspect_conf = model.get_aspect_config()
+        random_org_conf = aspect_conf['services']['random_org']
 
         self.frame_id = aspect_conf.get('frame_id', 'ASPECT_001')
-        self.picture_dir = os.path.expanduser(model.config()['model']['pic_dir'])
-        self.db_file = os.path.expanduser(model.config()['model']['db_file'])
+        self.picture_dir = os.path.expanduser(model.get_model_config()['pic_dir'])
+        self.db_file = os.path.expanduser(model.get_model_config()['db_file'])
 
-        self.api_url = services_conf.get("api_url")
-        self.api_key = services_conf.get("api_key")  # choose key rotation logic if needed
-        self.daily_limit = services_conf.get("daily_limit", 1000)
-        self.rate_limit = services_conf.get("rate_limit", 10)
+        self.api_url = random_org_conf.get("api_url")
+        self.api_key = random_org_conf.get("api_key1")  # choose key rotation logic if needed
+        self.daily_limit = random_org_conf.get("daily_limit", 1000)
+        self.rate_limit = random_org_conf.get("rate_limit", 10)
 
         self.target_set_size = aspect_conf.get("target_set_size", 10)
         self.min_set_size = aspect_conf.get("min_set_size", 3)
-        self.shuffle = model.config()['model'].get("shuffle", True)
+        self.shuffle = model.get_model_config().get("shuffle", True)
 
         if not self.api_key:
             raise ValueError("API Key is required for Random.org integration.")
@@ -43,7 +43,10 @@ class NewSlideshow:
                 conn.row_factory = sqlite3.Row
                 c = conn.cursor()
                 c.execute("SELECT file_id, folder_id FROM file ORDER BY file_id")
-                data = c.fetchall()
+                data = c.fetchall()    
+                if not data:
+                    self.__logger.warning("No files available for slideshow")
+                    return None
                 return data
         except Exception as e:
             self.__logger.warning(f"Error fetching file IDs: {e}")
@@ -71,7 +74,7 @@ class NewSlideshow:
                     "max": n_total,
                     "replacement": False
                 },
-                "id": f"{frame_id}-{int(time.time()*1000)}"
+                "id": f"{self.frame_id}-{int(time.time()*1000)}"
             }
 
             try:
@@ -173,6 +176,7 @@ class NewSlideshow:
                 c.execute("""
                     SELECT f.file_id, f.basename, f.extension, f.width, f.height 
                     FROM file f 
+                    WHERE f.file_id IN ({})
                 """.format(','.join('?' * len(all_file_ids))), all_file_ids)
                 
                 file_metadata = {row['file_id']: (row['basename'], row['extension'], row['width'], row['height']) for row in c.fetchall()}
@@ -181,8 +185,8 @@ class NewSlideshow:
                 for g_num, (g_type, ids) in enumerate(groups, start=1):
                     for order, file_id in enumerate(ids, start=1):
                         if file_id in file_metadata:
-                            basename, extension, orientation = file_metadata[file_id]
-                            orientation_text = 'portrait' if orientation == 2 else 'landscape'
+                            basename, extension, width, height = file_metadata[file_id]
+                            orientation_text = 'portrait' if height > width else 'landscape'
                             insert_data.append((g_num, order, file_id, basename, extension, orientation_text, 0))
 
                 c.executemany("""
@@ -191,11 +195,15 @@ class NewSlideshow:
                 """, insert_data)
                 # Auto-commit when exiting the with block
         except Exception as e:
-            self.__logger.warning(f"Error saving playlist: {e}")
+            self.__logger.warning(f"Error saving slideshow: {e}")
 
     def generate_slideshow(self):
         self.__logger.info("Loading image list from database...")
+        
         file_data = self.fetch_file_ids()
+        if not file_data:
+            self.__logger.warning("Returning None")
+            return None
         file_ids = [row['file_id'] for row in file_data]
         folder_map = {row['file_id']: row['folder_id'] for row in file_data}
 
@@ -209,7 +217,7 @@ class NewSlideshow:
         self.__logger.info("Building alternating groups...")
         groups = self.build_groups_dynamic(file_ids, folder_map)
 
-        self.__logger.info("Writing playlist table...")
+        self.__logger.info("Writing slideshow table...")
         self.save_to_slideshow(groups)
 
         self.__logger.info(f"Done. Created {len(groups)} groups.")

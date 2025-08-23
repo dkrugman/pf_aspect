@@ -230,6 +230,11 @@ class Model:
                                                     self.__geo_reverse,
                                                     model_config['update_interval'],
                                                     aspect_config.get('square_img', 'Landscape'))
+        # Give ImageCache a back-reference to this model for slideshow creation
+        try:
+            self.__image_cache.set_model(self)
+        except Exception:
+            pass
         self.__deleted_pictures = model_config['deleted_pictures']
         self.__no_files_img = os.path.expanduser(model_config['no_files_img'])
         self.__sort_cols = model_config['sort_cols']
@@ -436,69 +441,39 @@ class Model:
             
     def get_next_file(self):                             # MAIN LOOP: keep getting next file
         missing_images = 0
-        self.__logger.debug("get_next_file called, number of files:  %s. File Index: %s", self.__number_of_files, self.__file_index)
+        pic = None  # Initialize pic to avoid UnboundLocalError
+        #self.__logger.debug("get_next_file called, number of files:  %s. File Index: %s", self.__number_of_files, self.__file_index)
         # Check for active slideshow
+        #self.__logger.debug("is_active_slideshow: %s", self.__image_cache._is_active_slideshow())
         if self.__image_cache._is_active_slideshow():
             # Return next image from slideshow
-            return self.__image_cache.get_next_file_from_slideshow()
-            # Set played = 1 for this image
-            self.__image_cache.set_played_for_image(self.__current_pic.file_id)
+            pic = self.__image_cache.get_next_file_from_slideshow()
+            if pic:
+                # Set played = 1 for this image
+                self.__image_cache.set_played_for_image(pic.file_id)
             # if no more images, create new slideshow
             if self.__image_cache.get_next_file_from_slideshow() is None:
                 self.__image_cache.create_new_slideshow()
         else:
             # import new images, check for images on disk, images to process or wait
-            while True:                                      # loop until we acquire a valid image set
-                pic = None
-                if self.__reload_files:                      # Reload the playlist if requested
-                    self.__logger.debug("Reloading files from image cache")
-                    for _i in range(5):                      # give image_cache chance on first load if a large directory
-                        self.__get_files()
-                        missing_images = 0
-                        if self.__number_of_files > 0:
-                            break
-                        time.sleep(0.5)
-
-                # If we don't have any files to show, prepare the "no images" image
-                # Also, set the reload_files flag so we'll check for new files on the next pass...
-                if self.__number_of_files == 0 or missing_images >= self.__number_of_files:
-                    pic = Pic(self.__no_files_img, 0, 0)
-                    self.__logger.warning("No Images. Reload requested")
-                    self.__reload_files = True
-                    break
-
-                # REPLACE FOLLOWING WITH CODE TO GENERATE A NEW SLIDESHOW
-                # If we've displayed all images...
-                #   If it's time to shuffle, set a flag to do so
-                #   Loop back, which will reload and shuffle if necessary
-                if self.__file_index == self.__number_of_files:
-                    self.__num_run_through += 1
-                    if self.shuffle and self.__num_run_through >= self.get_model_config()['reshuffle_num']:
-                        self.__logger.info("Reshuffling files after {} runs through".format(self.__num_run_through))
-                        self.__reload_files = True
-                        self.__file_index = 0
-                        continue
-
-                file_id = self.__file_list[self.__file_index][0]   # Load the current image
-                self.__logger.debug("Loading file: %s", file_id)
-                pic_row = self.__image_cache.get_file_info(file_id)
-                self.__logger.debug("pic_row: %s", pic_row)
-                pic = Pic(**pic_row) if pic_row is not None else None
-                
-                if pic and not os.path.isfile(pic.fname):    # Verify the image actually exists on disk
-                    pic = None
-                
-                self.__file_index += 1                       # Increment the image index for next time
-
-                if pic:                                      # If pic is valid here, everything is OK. Break out of the loop and return the set
-                    break
-
-                # Here, pic is undefined. That's a problem. Loop back and get another image.
-                # Track the number of times we've looped back so we can abort if we don't have *any* images to display
-                missing_images += 1
-
-            self.__current_pic = pic
-            return self.__current_pic
+            if not self.__image_cache._creating_new_slideshow:
+                self.__image_cache._creating_new_slideshow = True
+                new_images = self.__image_cache.create_new_slideshow()
+                if new_images:
+                    self.__image_cache._creating_new_slideshow = False
+                    pic = self.__image_cache.get_next_file_from_slideshow()
+                _ = self.__image_cache._is_active_slideshow()
+            else:
+                self.__logger.warning("No Images.")
+                pic = Pic(self.__no_files_img, 0, 0)
+        
+        # Fallback if pic is still None
+        if pic is None:
+            pic = Pic(self.__no_files_img, 0, 0)
+            
+        self.__current_pic = pic
+        return self.__current_pic
+            
 
     def get_number_of_files(self):
         return sum(
@@ -526,46 +501,7 @@ class Model:
                 self.__number_of_files -= 1
                 break
 
-    def __get_files(self):
-        if self.subdirectory != "":
-            self.__logger.debug("Using subdirectory: %s", self.subdirectory)
-            picture_dir = os.path.join(self.__pic_dir, self.subdirectory)  # TODO catch, if subdirecotry does not exist
-        else:
-            picture_dir = self.__pic_dir
-        where_list = ["fname LIKE '{}/%'".format(picture_dir)]  # TODO / on end to stop 'test' also selecting test1 test2 etc  # noqa: E501
-        self.__logger.debug("Using picture directory: %s", picture_dir)
-        self.__logger.debug("Using where clauses: %s", self.__where_clauses)
-        where_list.extend(self.__where_clauses.values())
-
-        if len(where_list) > 0:
-            where_clause = " AND ".join(where_list)       # TODO now always true - remove unreachable code
-        else:
-            where_clause = "1"
-
-        sort_list = []
-        recent_n = self.get_model_config()["recent_n"]
-        if recent_n > 0:
-            sort_list.append("last_modified < {:.0f}".format(time.time() - 3600 * 24 * recent_n))
-
-        if self.shuffle:
-            sort_list.append("RANDOM()")
-        else:
-            if self.__col_names is None:
-                self.__col_names = self.__image_cache.get_column_names()  # do this once
-            for col in self.__sort_cols.split(","):
-                colsplit = col.split()
-                if colsplit[0] in self.__col_names and (len(colsplit) == 1 or colsplit[1].upper() in ("ASC", "DESC")):
-                    sort_list.append(col)
-            sort_list.append("fname ASC")                # always finally sort on this in case nothing else to sort on or sort_cols is "" # noqa: E501
-        sort_clause = ",".join(sort_list)
-
-        self.__file_list = self.__image_cache.query_cache(where_clause, sort_clause)
-        self.__number_of_files = len(self.__file_list)
-        self.__file_index = 0
-        self.__num_run_through = 0
-        self.__reload_files = False
-
-    def __generate_random_string(self, length):
+    def __generate_random_string(self, length):  # for http password
         random_bytes = os.urandom(length // 2)
         random_string = ''.join('{:02x}'.format(ord(chr(byte))) for byte in random_bytes)
         return random_string
