@@ -124,11 +124,29 @@ class Controller:
     def purge_files(self):
         self.__model.purge_files()
 
-    async def import_wrapper(self):
+    async def import_wrapper(self, model):
         try:
-            await self._import_photos.check_for_updates()
+            # Create async importer
+            async with self._import_photos as importer:
+                
+                # Check if already importing
+                if importer.is_importing():
+                    self.__logger.info("Import already in progress...")
+                    return
+                
+                # Start the import process
+                self.__logger.info("Starting async photo import...")
+                await importer.check_for_updates()
+                self.__logger.info("Import completed!")
+                
         except Exception as e:
             self.__logger.exception(f"Import task failed: {e}")
+
+    # async def import_wrapper(self):
+    #     try:
+    #         await self._import_photos.check_for_updates()
+    #     except Exception as e:
+    #         self.__logger.exception(f"Import task failed: {e}")
 
     async def start(self):
         # Check for other picframe processes before starting
@@ -207,7 +225,7 @@ class Controller:
             self.__logger.warning("This Raspberry Pi is dedicated to picframe, so only one instance should be running.")
             self.__logger.warning("Consider stopping the other processes or restarting the system.")
         else:
-            self.__logger.debug("No other picframe processes detected.")
+            #self.__logger.debug("No other picframe processes detected.")
 
     def _get_other_picframe_pids(self):
         """Get list of other picframe process PIDs (excluding current process)."""

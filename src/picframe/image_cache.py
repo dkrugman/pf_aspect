@@ -3,10 +3,12 @@ import os
 import time
 import logging
 import threading
+from datetime import datetime
 from picframe.get_image_meta import GetImageMeta
 from picframe.video_streamer import VIDEO_EXTENSIONS
 from picframe.image_meta_utils import get_exif_info
 from picframe.video_meta_utils import get_video_metadata
+from picframe.file_time_utils import get_file_birth_time, get_file_times, is_birth_time_available
 import picframe.schema as schema
 
 class ImageCache:
@@ -50,12 +52,19 @@ class ImageCache:
         self.__shutdown_completed = False
         self.__purge_files = False
         self.__square_img_setting = square_img_setting
+        # Guard flag to prevent concurrent slideshow creation
+        self._creating_new_slideshow = False
+        # Optional back-reference to the owning model for slideshow generation
+        self.__model = None
 
         if not self.__schema_exists_and_valid():
             self.__logger.debug("Creating schema")
             schema.create_schema(self.__db)
             self.__logger.debug("Updating cache (add files on disk to DB)")
             self.update_cache()
+        
+        # Log file time capabilities
+        self.log_file_time_capabilities()
 
     def __schema_exists_and_valid(self):
         """Check if db_info table exists and has a valid schema version."""
@@ -86,9 +95,56 @@ class ImageCache:
     def get_next_file_from_slideshow(self):
         """Get the next file from the slideshow."""
         cur = self.__db.cursor()
-        cur.execute("SELECT file_id FROM slideshow WHERE played = 0 ORDER BY group_num ASC, order_in_group ASC LIMIT 1")
+        cur.row_factory = sqlite3.Row
+        cur.execute("""
+            SELECT s.file_id, fo.name || '/' || f.basename || '.' || f.extension as fname, f.last_modified,
+                   COALESCE(m.orientation, 1) as orientation, 
+                   COALESCE(m.exif_datetime, 0) as exif_datetime,
+                   COALESCE(m.f_number, 0) as f_number, m.exposure_time,
+                   COALESCE(m.iso, 0) as iso, m.focal_length, m.make, m.model, m.lens,
+                   COALESCE(m.rating, 0) as rating, m.latitude, m.longitude,
+                   COALESCE(f.width, 0) as width, COALESCE(f.height, 0) as height,
+                   CASE WHEN f.height > f.width THEN 1 ELSE 0 END as is_portrait,
+                   l.description as location, m.title, m.caption, m.tags, m.nix_caption
+            FROM slideshow s
+            JOIN file f ON s.file_id = f.file_id
+            JOIN folder fo ON f.folder_id = fo.folder_id
+            LEFT JOIN meta m ON s.file_id = m.file_id
+            LEFT JOIN location l ON l.latitude = m.latitude AND l.longitude = m.longitude
+            WHERE s.played = 0 
+            ORDER BY s.group_num ASC, s.order_in_group ASC 
+            LIMIT 1
+        """)
         row = cur.fetchone()
-        return row[0] if row else None
+        if row:
+            # Import Pic class
+            from picframe.model import Pic
+            return Pic(
+                fname=row['fname'],
+                last_modified=row['last_modified'],
+                file_id=row['file_id'],
+                orientation=row['orientation'],
+                exif_datetime=row['exif_datetime'],
+                f_number=row['f_number'],
+                exposure_time=row['exposure_time'],
+                iso=row['iso'],
+                focal_length=row['focal_length'],
+                make=row['make'],
+                model=row['model'],
+                lens=row['lens'],
+                rating=row['rating'],
+                latitude=row['latitude'],
+                longitude=row['longitude'],
+                width=row['width'],
+                height=row['height'],
+                is_portrait=row['is_portrait'],
+                location=row['location'],
+                title=row['title'],
+                caption=row['caption'],
+                tags=row['tags'],
+                nix_caption=row['nix_caption']
+            )
+        return None
         
     def set_played_for_image(self, file_id):
         """Set played = 1 for the given file_id."""
@@ -98,42 +154,33 @@ class ImageCache:
 
     def create_new_slideshow(self):
         """Create a new slideshow using the NewSlideshow class."""
+        # Prevent re-entrancy if called concurrently (e.g., by a timer)
+        self.__logger.debug("CREATE_NEW_SLIDESHOW called ********************************")
+        if getattr(self, "_creating_new_slideshow", False):
+            self.__logger.info("CREATING NEW SLIDESHOW ATTR NOT FOUND")
+        elif self._creating_new_slideshow:
+            self.__logger.debug("Slideshow creation already in progress; skipping new request.")
+            return
+        self._creating_new_slideshow = True
         try:
             from picframe.create_new_slideshow import NewSlideshow
             # We need to pass a model instance, but ImageCache doesn't have direct access to it
             # For now, we'll create a simple slideshow without the full NewSlideshow functionality
-            self.__logger.info("Creating new slideshow...")
-            
-            # Get all available file IDs with their metadata
-            cur = self.__db.cursor()
-            cur.execute("""
-                SELECT f.file_id, f.basename, f.extension, m.orientation 
-                FROM file f 
-                LEFT JOIN meta m ON f.file_id = m.file_id 
-                ORDER BY RANDOM() LIMIT 50
-            """)
-            rows = cur.fetchall()
-            
-            if not rows:
-                self.__logger.warning("No files available for slideshow")
-                return
-            
-            # Clear existing slideshow
-            cur.execute("DELETE FROM slideshow")
-            
-            # Insert new slideshow entries with proper schema
-            for i, row in enumerate(rows, 1):
-                orientation_text = 'portrait' if row['orientation'] == 2 else 'landscape'
-                cur.execute("""
-                    INSERT INTO slideshow (group_num, order_in_group, file_id, basename, extension, orientation, played) 
-                    VALUES (?, ?, ?, ?, ?, ?, 0)
-                """, (1, i, row['file_id'], row['basename'], row['extension'], orientation_text))
-            
-            self.__db.commit()
-            self.__logger.info(f"Created new slideshow with {len(rows)} images")
-            
+            if self.__model is None:
+                self.__logger.warning("Model reference not set on ImageCache; cannot create slideshow")
+                return None
+            self.__logger.info("Calling NewSlideshow(model).generate_slideshow()...")
+            ns = NewSlideshow(self.__model)
+            ns.generate_slideshow()
+            self.__logger.info("New slideshow creation invoked")
         except Exception as e:
             self.__logger.warning(f"Error creating new slideshow: {e}")
+        finally:
+            self._creating_new_slideshow = False
+
+    def set_model(self, model):
+        """Provide a back-reference to the model for configuration access."""
+        self.__model = model
 
     def pause_looping(self, value):
         self.__pause_looping = value
@@ -162,8 +209,8 @@ class ImageCache:
 
         while self.__modified_files and not self.__pause_looping:
             file = self.__modified_files.pop(0)
-            self.__logger.debug('Inserting: %s', file)
-            self.__insert_file(file)
+            #self.__logger.debug('Inserting: %s', file)
+            self.__insert_file(file, source='update_cache')
 
         if not self.__modified_files:
             self.__update_folder_info(self.__modified_folders)
@@ -189,13 +236,25 @@ class ImageCache:
             return None
         sql = f"SELECT * FROM all_data where file_id = {file_id}"
         row = self.__db.execute(sql).fetchone()
+        creation_time = self.get_file_creation_time_linux(row['fname'])
+        if creation_time:
+            self.__logger.debug(f"Creation time of '{row['fname']}' is: {creation_time}")
+        else:
+            self.__logger.debug(f"Could not determine the creation time of '{row['fname']}'.")
         try:
-            if row is not None and row['last_modified'] != os.path.getmtime(row['fname']):
-                self.__logger.debug('Cache miss: File %s changed on disk', row['fname'])
-                self.__insert_file(row['fname'], file_id)
-                row = self.__db.execute(sql).fetchone()
+            if row is not None:
+                # Check if file creation time has changed (more reliable than modification time)
+                if 'creation_time' in row and row['creation_time'] is not None:
+                    current_creation_time = self.get_file_creation_time_timestamp(row['fname'])
+                    if row['creation_time'] != current_creation_time:
+                        self.__logger.debug('Cache miss: File %s creation time changed on disk', row['fname'])
+                        self.__insert_file(row['fname'], file_id, source='cache_miss')
+                        row = self.__db.execute(sql).fetchone()
         except OSError:
             self.__logger.warning("Image '%s' does not exist or is inaccessible", row['fname'])
+        except KeyError as e:
+            # Log missing database field
+            self.__logger.debug(f"Database field missing: {e}")
         if row and row['latitude'] and row['longitude'] and row['location'] is None:
             if self.__get_geo_location(row['latitude'], row['longitude']):
                 row = self.__db.execute(sql).fetchone()
@@ -266,11 +325,11 @@ class ImageCache:
         out_of_date_files = []
         # sql_select = "SELECT fname, last_modified FROM all_data WHERE fname = ? and last_modified >= ?"
         sql_select = """
-        SELECT file.basename, file.last_modified
+        SELECT file.basename, file.creation_time
             FROM file
                 INNER JOIN folder
                     ON folder.folder_id = file.folder_id
-            WHERE file.basename = ? AND file.extension = ? AND folder.name = ? AND file.last_modified >= ?
+            WHERE file.basename = ? AND file.extension = ? AND folder.name = ? AND file.creation_time >= ?
         """
         for dir, _date in modified_folders:
             for file in os.listdir(dir):
@@ -279,19 +338,22 @@ class ImageCache:
                         # have to filter out all the Apple junk
                         and '.AppleDouble' not in dir and not file.startswith('.')):
                     full_file = os.path.join(dir, file)
-                    mod_tm = os.path.getmtime(full_file)
-                    found = self.__db.execute(sql_select, (base, extension.lstrip("."), dir, mod_tm)).fetchone()
+                    creation_tm = self.get_file_creation_time_timestamp(full_file)
+                    found = self.__db.execute(sql_select, (base, extension.lstrip("."), dir, creation_tm)).fetchone()
                     if not found:
                         out_of_date_files.append(full_file)
         return out_of_date_files
 
-    def insert_file(self, file, file_id=None):
+    def insert_file(self, file, file_id=None, source='Public', playlist=None):
         """Public method to insert a file into the database."""
-        return self.__insert_file(file, file_id)
+        return self.__insert_file(file, file_id, source, playlist)
 
-    def __insert_file(self, file, file_id=None):
-        file_insert = "INSERT OR REPLACE INTO file(folder_id, basename, extension, width, height, last_modified, source) VALUES((SELECT folder_id from folder where name = ?), ?, ?, ?, ?, ?, ?)"  # noqa: E501
-        # file_update = "UPDATE file SET folder_id = (SELECT folder_id from folder where name = ?), basename = ?, extension = ?, last_modified = ?, source = ? WHERE file_id = ?"  # noqa: E501
+    def __insert_file(self, file, file_id=None, source='Default', playlist=None):
+        # Use INSERT OR REPLACE with all unique constraint fields to avoid duplicates
+        file_insert = """
+            INSERT OR IGNORE INTO file(folder_id, source, playlist, basename, extension, width, height, creation_time) 
+            VALUES((SELECT folder_id from folder where name = ?), ?, ?, ?, ?, ?, ?, ?)
+        """
         # Insert the new folder if it's not already in the table.
         folder_insert = "INSERT OR IGNORE INTO folder(name) VALUES(?)"
 
@@ -308,7 +370,7 @@ class ImageCache:
         mod_tm = os.path.getmtime(file)
         dir, file_only = os.path.split(file)
         base, extension = os.path.splitext(file_only)
-        extension = extension.lower()
+        extension = extension.lower().lstrip(".")
         source = "ImageCache"
 
         # Insert this file's info into the folder, file, and meta tables
@@ -316,7 +378,11 @@ class ImageCache:
             with self.__db:  # auto-commit
                 self.__db.execute(folder_insert, (dir,))
                 if file_id is None:
-                    self.__db.execute(file_insert, (dir, base, extension.lstrip("."), width, height, mod_tm, source))
+                    # Use creation time instead of modification time
+                    creation_tm = self.get_file_creation_time_timestamp(file)
+                    # Execute with all required parameters including playlist (NULL)
+                    self.__logger.debug(f"Inserting file from {source}: {base}.{extension} in {dir} with creation_time={creation_tm}")
+                    self.__db.execute(file_insert, (dir, source, playlist, base, extension, width, height, creation_tm))
                 try:
                     self.__db.execute(meta_insert, vals)
                 except Exception as e:
@@ -375,6 +441,96 @@ class ImageCache:
                 except Exception as e:
                     self.__logger.warning(f"Error purging files: {e}")
             self.__purge_files = False
+
+
+    def get_file_creation_time_linux(self, filepath):
+        """
+        Retrieves the creation time (birth time) of a file using enhanced utilities.
+        
+        This method now uses the file_time_utils module which can access creation time
+        even on systems where Python's os.stat() doesn't support st_birthtime.
+
+        Args:
+            filepath (str): The path to the file.
+
+        Returns:
+            datetime.datetime: The creation time as a datetime object, or None if not available.
+        """
+        try:
+            # Use our enhanced file time utilities
+            birth_time = get_file_birth_time(filepath)
+            
+            if birth_time:
+                return birth_time
+            else:
+                # Fall back to modification time if birth time unavailable
+                mod_time = os.path.getmtime(filepath)
+                fallback_time = datetime.fromtimestamp(mod_time)
+                self.__logger.debug(f"Birth time unavailable for {filepath}, using modification time: {fallback_time}")
+                return fallback_time
+                
+        except FileNotFoundError:
+            self.__logger.warning(f"File not found: {filepath}")
+            return None
+        except Exception as e:
+            self.__logger.warning(f"Error getting creation time for {filepath}: {e}")
+            return None
+    
+    def get_file_creation_time_timestamp(self, filepath):
+        """
+        Get file creation time as a timestamp (float) for database storage.
+        
+        Args:
+            filepath (str): The path to the file.
+            
+        Returns:
+            float: Unix timestamp of creation time, or 0.0 if unavailable.
+        """
+        try:
+            birth_time = self.get_file_creation_time_linux(filepath)
+            if birth_time:
+                return birth_time.timestamp()
+            return 0.0
+        except Exception as e:
+            self.__logger.warning(f"Error getting creation timestamp for {filepath}: {e}")
+            return 0.0
+    
+    def get_enhanced_file_times(self, filepath):
+        """
+        Get comprehensive file time information including creation time.
+        
+        Args:
+            filepath (str): The path to the file.
+            
+        Returns:
+            dict: Dictionary containing all available time information.
+        """
+        try:
+            return get_file_times(filepath)
+        except Exception as e:
+            self.__logger.warning(f"Error getting enhanced file times for {filepath}: {e}")
+            return {}
+    
+    def is_birth_time_supported(self):
+        """
+        Check if file creation time (birth time) is supported on this system.
+        
+        Returns:
+            bool: True if birth time is available, False otherwise.
+        """
+        return is_birth_time_available()
+    
+    def log_file_time_capabilities(self):
+        """
+        Log information about file time capabilities of the current system.
+        """
+        birth_supported = self.is_birth_time_supported()
+        self.__logger.info(f"File birth time support: {'Available' if birth_supported else 'Not available'}")
+        
+        if birth_supported:
+            self.__logger.info("System supports file creation time retrieval")
+        else:
+            self.__logger.info("System does not support file creation time, will use modification time as fallback")
 
 # If being executed (instead of imported), kick it off...
 if __name__ == "__main__":

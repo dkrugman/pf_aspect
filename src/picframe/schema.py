@@ -28,6 +28,7 @@ def create_schema(db):
             source         TEXT NOT NULL,
             playlist_name  TEXT NOT NULL,
             playlist_id    INTEGER,
+            src_version    INTEGER,
             picture_count  INTEGER,
             last_modified  REAL DEFAULT 0 NOT NULL,
             last_imported  REAL DEFAULT 0 NOT NULL,
@@ -71,10 +72,11 @@ def create_schema(db):
             extension       TEXT NOT NULL,
             width           INTEGER,
             height          INTEGER,
+            creation_time   REAL DEFAULT 0 NOT NULL,
             last_modified   REAL DEFAULT 0 NOT NULL,
             displayed_count INTEGER DEFAULT 0 NOT NULL,
             last_displayed  REAL DEFAULT 0 NOT NULL,
-            UNIQUE(folder_id, source, playlist, basename, extension)
+            UNIQUE(folder_id, basename, extension, width, height, creation_time)
         )"""
 
     sql_meta_table = """
@@ -122,6 +124,7 @@ def create_schema(db):
         AS
         SELECT
             folder.name || "/" || file.basename || "." || file.extension AS fname,
+            file.creation_time,
             file.last_modified,
             meta.*,
             meta.height > meta.width as is_portrait,
