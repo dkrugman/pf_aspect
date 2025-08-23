@@ -6,8 +6,8 @@ class LoginError(Exception):
 
 class ImportPhotos:
     def __init__(self):
-        self.username = "lzises"
-        self.password = "486285as"
+        self.username = ""
+        self.password = ""
         self.login_url = "https://api.nixplay.com/www-login/"
         self.playlist_url = "https://api.nixplay.com/v3/playlists/"
         self.item_path = "slides"  # url is: playlist_url + list_id + '/' + item_path
