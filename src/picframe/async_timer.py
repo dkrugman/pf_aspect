@@ -92,7 +92,7 @@ class AsyncTimerManager:
                 for task in self._tasks:
                     due = (now - task["last_run"] >= task["interval"])
                     if due:
-                        self.__logger.info(f"Task '{task['name']}' is due (interval: {task['interval']}s, last_run: {task['last_run']}, now: {now})")
+                        #self.__logger.info(f"Task '{task['name']}' is due (interval: {task['interval']}s, last_run: {task['last_run']}, now: {now})")
                         task["last_run"] = now
                         self._save_last_run(task["name"], now)
                         coros.append(self._run_task(task))

@@ -40,7 +40,7 @@ def make_sprite(path, rotation=False):
             ext = os.path.splitext(path)[1].lower()
             with Image.open(path) as im:
                 if not(ext in ('.heif', '.heic')):  # heif and heic images are converted to PIL.Image obects and are alway in correct orienation # noqa: E501
-                    im = ImageOps.exif_transpose(im).rotate(rotation, resample=False, expand=True)
+                    im = ImageOps.exif_transpose(im).rotate(90, resample=False, expand=True)
                 tex = pi3d.Texture(im, mipmap=False, blend=True, m_repeat=True, free_after_load=True)
         else:
             tex = pi3d.Texture(path, mipmap=False, blend=True, m_repeat=True, free_after_load=True)

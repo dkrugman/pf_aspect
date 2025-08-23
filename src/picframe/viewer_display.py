@@ -2,7 +2,7 @@ import os, logging, time, subprocess, pi3d  #type: ignore
 from .async_timer import init_timer
 from typing import Optional, List, Tuple
 from datetime import datetime
-from PIL import Image, ImageFilter, ImageFile
+from PIL import Image, ImageFilter, ImageFile, ImageOps
 import numpy as np
 from picframe import mat_image, get_image_meta
 from picframe.video_streamer import VideoStreamer, VIDEO_EXTENSIONS, VideoFrameExtractor
@@ -197,7 +197,7 @@ class ViewerDisplay:
         if pic is not None and paused is not None:  # text needs to be refreshed
             self.__make_text(pic, paused)
         self.__name_tm = max(self.__name_tm, time.time() + self.__show_text_tm)
-        self.__logger.debug(f"PIC: {pic} PAUSED: {paused} NAME_TM: {self.__name_tm} SHOW_TEXT_TM: {self.__show_text_tm}")
+        #self.__logger.debug(f"PIC: {pic} PAUSED: {paused} NAME_TM: {self.__name_tm} SHOW_TEXT_TM: {self.__show_text_tm}")
 
     def set_brightness(self, val):
         self.__slide.unif[55] = val  # take immediate effect
@@ -240,23 +240,12 @@ class ViewerDisplay:
 
     def __orientate_image(self, im, pic):
         ext = os.path.splitext(pic.fname)[1].lower()
-        if ext in ('.heif', '.heic'):  # heif and heic images are converted to PIL.Image obects and are alway in correct orienation # noqa: E501
-            return im
-        orientation = pic.orientation
-        if orientation == 2:
-            im = im.transpose(Image.FLIP_LEFT_RIGHT)
-        elif orientation == 3:
-            im = im.transpose(Image.ROTATE_180)  # rotations are clockwise
-        elif orientation == 4:
-            im = im.transpose(Image.FLIP_TOP_BOTTOM)
-        elif orientation == 5:
-            im = im.transpose(Image.FLIP_LEFT_RIGHT).transpose(Image.ROTATE_90)
-        elif orientation == 6:
-            im = im.transpose(Image.ROTATE_270)
-        elif orientation == 7:
-            im = im.transpose(Image.FLIP_LEFT_RIGHT).transpose(Image.ROTATE_270)
-        elif orientation == 8:
-            im = im.transpose(Image.ROTATE_90)
+        if pic.is_portrait and not(ext in ('.heif', '.heic')):  # heif and heic images are converted to PIL.Image obects and are alway in correct orienation # noqa: E501
+            #self.__logger.debug(f"TURN TURN TURN TURN TURN TURN TURN TURN TURN TURN TURN TURN {pic.fname}")
+            try:
+                im = ImageOps.exif_transpose(im).rotate(90, resample=False, expand=True)
+            except Exception as e:
+                self.__logger.warning(f"Error orientating image: {e}")
         return im
 
     def __get_mat_image_control_values(self, mat_images_value):
@@ -282,6 +271,7 @@ class ViewerDisplay:
             diff_aspect = 1 - (image_aspect / screen_aspect)
         else:
             diff_aspect = 1 - (screen_aspect / image_aspect)
+        #self.__logger.debug(f"screen_aspect: {screen_aspect}, image_aspect: {image_aspect}, diff_aspect: {diff_aspect}")
         return (screen_aspect, image_aspect, diff_aspect)
 
     def __tex_load(self, pic, size=None):  # noqa: C901
@@ -291,7 +281,7 @@ class ViewerDisplay:
             return None
         
         try:
-            self.__logger.debug(f"loading image: {pic.fname}")
+            #self.__logger.debug(f"loading image: {pic.fname}")
             if self.__mat_images and self.__matter is None:
                 self.__matter = mat_image.MatImage(
                     display_size=(self.__display.width, self.__display.height),
@@ -309,8 +299,8 @@ class ViewerDisplay:
                 im = get_image_meta.GetImageMeta.get_image_object(pic.fname)
                 if im is None:
                     return None
-                if pic.orientation != 1:
-                    im = self.__orientate_image(im, pic)
+                #self.__logger.debug(f"im: {im.size}")
+                im = self.__orientate_image(im, pic)
 
             screen_aspect, image_aspect, diff_aspect = self.__get_aspect_diff(size, im.size)
 
@@ -346,6 +336,7 @@ class ViewerDisplay:
         except Exception as e:
             self.__logger.warning("Can't create tex from file: %s", pic.fname)
             self.__logger.warning("Cause: %s", e)
+            self.__logger.debug(f"im: {im.size}")
             tex = None
             # raise # only re-raise errors here while debugging
         return tex

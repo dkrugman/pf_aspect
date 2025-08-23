@@ -76,15 +76,6 @@ def unix_to_utc_string(timestamp):
 class LoginError(Exception):
     pass
 
-class GetPlaylistsError(Exception):
-    pass
-
-class FolderCreationError(Exception):
-    pass
-
-class GetMediaError(Exception):
-    pass
-
 class ImportPhotos:
     """Class to import photos from third-party services to local filesystem."""
     def __init__(self, model):
@@ -286,15 +277,6 @@ class ImportPhotos:
             media_items.append(data)
         return media_items
 
-
-# for each playlist (source_playlistname)
-# check if in DB
-# check modified time
-# check each file modified time
-# update as needed
-# delete removed playlists & files
-# item_path = "slides"                                            # NIXPLAY   url is: playlist_url + list_id + '/' + item_path
-
     def get_timer_task(self):
         return self.check_for_updates
 
@@ -326,16 +308,6 @@ class ImportPhotos:
         string = re.sub(r'[\\/:*?"<>|]', '_', string)                       # Replace invalid characters with underscores
         string = string.strip()                                             # Remove leading/trailing whitespace
         return string
-
-    def compare_modified_times(self, subdirectory, date):
-        """Checks if nixplay playlist modified is > local directory (always use UTC)"""
-        local_mtime = os.path.getmtime(subdirectory)
-        local_mtime = datetime.fromtimestamp(local_mtime, tz=timezone.utc)
-        nix_mtime = datetime.fromisoformat(date)
-        nix_mtime = nix_mtime.replace(tzinfo=pytz.utc)
-        diff = local_mtime - nix_mtime                                      # if diff is negative, nixcloud playlist has changed - we must check local contents for adds/changes/deletes
-        return diff
-
 
     def save_downloaded_media(self, source, playlist_id, media_items):
         """
@@ -401,50 +373,3 @@ class ImportPhotos:
                     ))
         except Exception as e:
             self.__logger.warning(f"Error saving downloaded media: {e}")
-
-# CHECK OR CREATE SUBDIRECTORIES
-#     playlists_to_update = []
-#     flag = 0
-#     for playlist in playlists:
-#         folder_name = create_valid_folder_name(playlist["playlist_name"])   # Normalize name just in case (edge case of overwrites)
-#         subdirectory = os.path.expanduser(local_pictures_path + folder_name + "/")
-
-#         if os.path.isdir(subdirectory):
-#             diff = compare_modified_times(subdirectory, playlist["last_updated_date"])
-#             if diff < timedelta(0):
-#                 playlists_to_update.append((playlist["id"], playlist["playlist_name"], subdirectory))
-#                 flag = 1
-#         else:
-#             try:                                                            # Create new directory
-#                 os.makedirs(subdirectory, mode=0o700, exist_ok=False)
-#                 if wait_for_directory(subdirectory, timeout=10):
-#                     playlists_to_update.append((playlist["id"], playlist["playlist_name"], subdirectory))
-#                 else:
-#                     raise Exception("Creating new playlist directory timed out")
-#             except FolderCreationError as e:
-#                 print(f"Folder creation failed: {e}")
-#             except Exception as e:
-#                 print(f"An error occurred: {e}")
-#             flag = 1
-#             print("created new directories")
-#     if flag == 0:
-#         print("Nothing to update")    
-
-# #   GET MEDIA TO ADD / CHANGE / DELETE
-#     media_items = []
-#     media_to_add = []
-#     media_to_delete = []
-
-#     try:
-#         media_items = self.get_nixplay_media(session, playlist_url, item_path, playlists_to_update)
-#     except GetMediaError as e:
-#         print(f"Error getting media item names: {e}")
-#     except Exception as e:
-#         print(f"An error occurred: {e}")
-
-#     print(media_items)
-
-# NOTES:
-#   when copying media, item should be named with the original filename, followed by a separator token and the unique nix mediaItemId
-#   ** in playlist / slides some photos do not have a filename key!
-#   individual media items can be modified on nixplay - rotated, captioned, favorited, ?
