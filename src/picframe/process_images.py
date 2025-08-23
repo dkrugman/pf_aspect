@@ -149,11 +149,11 @@ class ProcessImages:
 
         # === Batch run with parallel threads ===
     async def process_images(self):
-        self.__logger.info("Processing images...")
-        self.__logger.info(f"Input folder: {self.input_folder}")
+        #self.__logger.info("Processing images...")
+        #self.__logger.info(f"Input folder: {self.input_folder}")
         files = list(self.input_folder.glob("*.[jJpP][pPnN]*"))
         if not files:
-            self.__logger.warning("No images found in input folder.")
+            self.__logger.info("No images found in input folder.")
             return
 
         self.__logger.debug(f"Processing {len(files)} files with {self.MAX_WORKERS} threads...")
