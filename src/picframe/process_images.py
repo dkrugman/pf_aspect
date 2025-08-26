@@ -5,10 +5,12 @@ import pyvips
 import asyncio
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
+from picframe.interface_http import EXTENSIONS
+from picframe.file_utils import parse_filename_metadata
 
 class ProcessImages:
     LOG_FILE = "resize_log.txt"
-    MAX_WORKERS = 4  # Number of threads
+    MAX_WORKERS = 10  # Number of threads
 
     def __init__(self, model):
         self.__logger = logging.getLogger(__name__)
@@ -142,16 +144,35 @@ class ProcessImages:
         # Get the image cache from the model
         image_cache = self.model.get_image_cache()
         # Convert Path object to string and insert into database
-        file_path = str(file)
-        image_cache.insert_file(file_path)
+        filename = str(file.name)
+        source, playlist = self.parse_filename(filename)
         
+        # Use non-blocking async insertion for better performance
+        import asyncio
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(image_cache.insert_file_async(filename, source=source, playlist=playlist))
+        except RuntimeError:
+            # No event loop running, fall back to synchronous insertion
+            image_cache.insert_file(filename, source=source, playlist=playlist)
+         
+    def parse_filename(self, filename):
+        """Parse filename to extract source and playlist using shared utility."""
+        # This is a bit of a hack, but the idea behind the import folder and processing is that any image can be dropped into the import folder 
+        # and it will get processed.
+        configured_sources = self.model.get_aspect_config().get("sources", {})
+        return parse_filename_metadata(filename, configured_sources)
+
+
+
 
 
         # === Batch run with parallel threads ===
     async def process_images(self):
         #self.__logger.info("Processing images...")
         #self.__logger.info(f"Input folder: {self.input_folder}")
-        files = list(self.input_folder.glob("*.[jJpP][pPnN]*"))
+        # Use extensions defined in interface_http for consistency
+        files = [f for f in self.input_folder.iterdir() if f.suffix.lower() in EXTENSIONS]
         if not files:
             self.__logger.info("No images found in input folder.")
             return

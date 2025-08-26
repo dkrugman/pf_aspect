@@ -31,6 +31,7 @@ class AsyncTimerManager:
         self._tasks = []
         self._running = False
         self._task = None  # Store the background task
+        self._running_tasks = set()  # Track running tasks for proper cleanup
         self._db = sqlite3.connect(self.__db_file, check_same_thread=False, timeout=5.0)
         # Use WAL mode for better concurrency, DELETE for compatibility with DB Browser for SQLite
         self._db.execute("PRAGMA journal_mode=DELETE")
@@ -68,6 +69,7 @@ class AsyncTimerManager:
 
     async def astop(self):
         """Async stop that waits for cleanup."""
+        self.__logger.info("Stopping AsyncTimerManager - ASYNC STOP")
         self._running = False
         if self._task and not self._task.done():
             self._task.cancel()
@@ -78,6 +80,7 @@ class AsyncTimerManager:
 
     def stop(self):
         """Sync wrapper if you can’t await."""
+        self.__logger.info("Stopping AsyncTimerManager - STOP")
         self._running = False
         if self._task and not self._task.done():
             self._task.cancel()
@@ -102,7 +105,12 @@ class AsyncTimerManager:
 
                 if coros:
                     self.__logger.info(f"Executing {len(coros)} timer tasks")
-                    await asyncio.gather(*coros)
+                    # Start tasks without awaiting them to avoid blocking the timer loop
+                    for coro in coros:
+                        task = asyncio.create_task(coro)
+                        self._running_tasks.add(task)
+                        # Remove task from set when it completes
+                        task.add_done_callback(lambda t: self._running_tasks.discard(t))
 
                 await asyncio.sleep(1)
         except asyncio.CancelledError:
@@ -166,6 +174,25 @@ class AsyncTimerManager:
                     """, (task["name"], task["last_run"]))
         except Exception as e:
             self.__logger.warning(f"Error saving timer states in bulk: {e}")
+
+    def stop(self):
+        """Stop the timer and cancel all running tasks."""
+        self.__logger.info("Stopping AsyncTimerManager...")
+        
+        # Cancel all running tasks first
+        if self._running_tasks:
+            self.__logger.info(f"Cancelling {len(self._running_tasks)} running timer tasks...")
+            for task in self._running_tasks.copy():
+                task.cancel()
+            self._running_tasks.clear()
+        
+        # Stop the main timer loop
+        self._running = False
+        if self._task and not self._task.done():
+            self.__logger.info("Cancelling main timer task...")
+            self._task.cancel()
+        
+        self.__logger.info("AsyncTimerManager stopped")
    
 # Singleton instance of AsyncTimerManager, use init_timer(model) to instantiate.
 timer = None

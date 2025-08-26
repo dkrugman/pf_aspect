@@ -159,7 +159,6 @@ class Controller:
         self._process_images = process_images.ProcessImages(self.__model)
 
         self.__timer = init_timer(self.__model)
-        self.__logger.info(f"Registering slideshow timer with interval: {self.__time_delay} seconds")
         self.__timer.register(self.next, interval=self.__time_delay, name='slideshow')
         self.__timer.register(self._import_photos.check_for_updates, interval=self.__import_interval, name='import')
         self.__timer.register(self._process_images.process_images, interval=self.__process_interval, name='process_images')
@@ -224,7 +223,7 @@ class Controller:
             self.__logger.warning(f"Found other picframe processes running: PIDs {', '.join(other_pids)}")
             self.__logger.warning("This Raspberry Pi is dedicated to picframe, so only one instance should be running.")
             self.__logger.warning("Consider stopping the other processes or restarting the system.")
-        else:
+        #else:
             #self.__logger.debug("No other picframe processes detected.")
 
     def _get_other_picframe_pids(self):
@@ -310,6 +309,14 @@ class Controller:
         
         # Import task is now handled by timer, no need to cancel separately
         
+        # Cleanup ImportPhotos database connections
+        if hasattr(self, '_import_photos') and self._import_photos:
+            self.__logger.info("Cleaning up ImportPhotos...")
+            try:
+                self._import_photos.cleanup()
+            except Exception as e:
+                self.__logger.error(f"Error cleaning up ImportPhotos: {e}")
+        
         # Stop peripheral interface if it exists
         if hasattr(self, '__interface_peripherals') and self.__interface_peripherals:
             self.__logger.info("Stopping peripheral interface...")
@@ -334,24 +341,34 @@ class Controller:
             except Exception as e:
                 self.__logger.error(f"Error stopping HTTP interface: {e}")
         
-        # Stop timer if it exists
+        # Stop timer if it exists - try both instance timer and global timer
+        timer_stopped = False
         if hasattr(self, '__timer') and self.__timer:
-            self.__logger.info("Stopping timer...")
             try:
                 self.__timer.stop()
+                timer_stopped = True
             except Exception as e:
-                self.__logger.error(f"Error stopping timer: {e}")
+                self.__logger.error(f"Error stopping instance timer: {e}")
+        
+        # If instance timer wasn't available, try global timer
+        if not timer_stopped:
+            try:
+                from .async_timer import timer as global_timer
+                if global_timer:
+                    global_timer.stop()
+                else:
+                    self.__logger.warning("No global timer found")
+            except Exception as e:
+                self.__logger.error(f"Error stopping global timer: {e}")
         
         # Stop model components
         try:
-            self.__logger.info("Stopping image cache...")
             self.__model.stop_image_cache()
         except Exception as e:
             self.__logger.error(f"Error stopping image cache: {e}")
         
         # Stop slideshow
         try:
-            self.__logger.info("Stopping slideshow...")
             self.__viewer.slideshow_stop()
         except Exception as e:
             self.__logger.error(f"Error stopping slideshow: {e}")
@@ -363,7 +380,6 @@ class Controller:
             self.__logger.error(f"Error re-enabling cursor: {e}")
         
         self.__logger.info("Picframe controller stopped successfully")
-
 
     def __signal_handler(self, sig, frame):
         msg = 'Ctrl-c pressed, stopping picframe...' if sig == signal.SIGINT else f'Signal {sig} received, stopping picframe...'

@@ -23,7 +23,7 @@ try:
 except ImportError:
     register_heif_opener = None
 
-EXTENSIONS = [".jpg", ".jpeg", ".png"]
+EXTENSIONS = [".jpg", ".jpeg", ".png", ".jxl", ".webp"]
 EXTENSION_TO_MIMETYPE = {
     # Videos
     '.mp4': 'video/mp4',
@@ -38,7 +38,8 @@ EXTENSION_TO_MIMETYPE = {
     '.jpg': 'image/jpeg',
     '.jpeg': 'image/jpeg',
     '.png': 'image/png',
-    '.jxl': 'image/jxl'
+    '.jxl': 'image/jxl',
+    '.webp': 'image/webp'
 }
 if register_heif_opener is not None:
     EXTENSIONS += [".heif", ".heic"]

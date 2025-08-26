@@ -4,17 +4,22 @@
 
 # Find the Python picframe process
 python_process_id=$(pgrep -f "python3.*picframe")
+
+# Find the unbuffer process first (parent process)
+unbuffer_process_id=$(pgrep -f "tclsh8.6.*unbuffer.*picframe")
+
 if [ -n "$python_process_id" ]; then
+    
     echo "Found picframe Python process (PID: $python_process_id), sending SIGTERM..."
     sudo kill -TERM $python_process_id
-    echo "Waiting for graceful shutdown..."
+    echo "Waiting for graceful shutdown (allow time for stop logs to be written)..."
 
-    # Find and stop the TCL unbuffer process that was running picframe (if it exists)
-    unbuffer_process_id=$(pgrep -f "tclsh8.6.*unbuffer.*picframe")
+    sleep 5  # Give time for graceful shutdown and log flushing
+    
+    # AFTER Python process has time to write logs, then stop the unbuffer process
     if [ -n "$unbuffer_process_id" ]; then
-        echo "Found picframe unbuffer process (PID: $unbuffer_process_id), sending SIGTERM..."
-        sudo kill $unbuffer_process_id
-        sleep 2
+        echo "Now stopping picframe unbuffer process (PID: $unbuffer_process_id)..."
+        sudo kill -TERM $unbuffer_process_id
     fi
 
     # Check if still running
@@ -25,8 +30,14 @@ if [ -n "$python_process_id" ]; then
         echo "Unbuffer process terminated gracefully."
     fi
 
-    sleep 2
-    # Check if still running
+    sleep 3  # Additional time for database connections to close
+
+    # Check if still running, add more time for graceful shutdown
+    if ps -p $python_process_id > /dev/null; then
+        echo "Additional time for graceful shutdown..."
+        sleep 10
+    fi
+
     if ps -p $python_process_id > /dev/null; then
         echo "Python process did not terminate gracefully, killing forcefully..."
         sudo kill -9 $python_process_id
@@ -45,6 +56,18 @@ if [ -n "$remaining_processes" ]; then
     echo "You may need to restart the system: sudo reboot"
 else
     echo "All picframe processes have been stopped."
+fi
+
+# Clean up any orphaned SQLite journal files
+echo "Checking for orphaned SQLite journal files..."
+journal_files=$(find /home/pi/picframe_data/data -name "*.db3-journal" 2>/dev/null)
+if [ -n "$journal_files" ]; then
+    echo "Found orphaned journal files, removing them:"
+    echo "$journal_files"
+    rm -f $journal_files
+    echo "Journal files cleaned up."
+else
+    echo "No orphaned journal files found."
 fi
 
 echo -e "\x1b[?7h"                                                          # Re-enable cursor visibility

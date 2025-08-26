@@ -112,7 +112,10 @@ class GetImageMeta:
                 if val:
                     val = val['Bag']['li']
                     if val and isinstance(val, list) and len(val) > 0:
-                        self.__tags['IPTC Keywords'] = ",".join(val)
+                        # Filter out None values and ensure all items are strings
+                        keywords = [str(item) for item in val if item is not None]
+                        if keywords:
+                            self.__tags['IPTC Keywords'] = ",".join(keywords)
             except KeyError:
                 pass
         except Exception as e:

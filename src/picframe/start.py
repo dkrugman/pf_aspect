@@ -1,15 +1,8 @@
-import sys, os, logging, locale, argparse, asyncio
+import sys, os, logging, locale, argparse, asyncio, signal
 from shutil import copytree
 from picframe import model, viewer_display, controller, __version__
-import signal
 
-# Import crash investigator
-try:
-    from picframe.crash_investigator import install_crash_handlers
-    CRASH_INVESTIGATION_AVAILABLE = True
-except ImportError:
-    CRASH_INVESTIGATION_AVAILABLE = False
-    print("Warning: Crash investigation module not available. Install psutil for enhanced crash detection.")
+# Global imports and setup
 
 PICFRAME_DATA_DIR = 'picframe_data'
 
@@ -78,35 +71,57 @@ def check_packages(packages):
         except ImportError:
             print(package, ': Not found!')
 
-async def main():
-    sys.stdout.write("\x1b[?7l")                         # disable line wrapping
+# Global signal handler function
+def picframe_signal_handler(signum, controller_ref):
+    """Asyncio-compatible signal handler."""
+    logger = logging.getLogger(__name__)
+    # Access the controller instance
+    if controller_ref[0]:
+        # Stop the main loop first
+        controller_ref[0].keep_looping = False
+        
+        try:
+            logger.info("Calling controller.stop() from signal handler...")
+            controller_ref[0].stop()
+            logger.info("Controller stop() completed from signal handler")
+            # Force a small delay to ensure database cleanup completes
+            import time
+            time.sleep(1)
+            
+        except Exception as e:
+            logger.error(f"Error in signal handler: {e}")
+    else:
+        logger.warning("No controller instance available for signal handling")
+
+def setup_signal_handlers(loop, controller_ref):
+    """Set up asyncio signal handlers for graceful shutdown."""
+    # Register the signal handlers with controller reference
+    loop.add_signal_handler(signal.SIGTERM, lambda: picframe_signal_handler(signal.SIGTERM, controller_ref))
+    loop.add_signal_handler(signal.SIGINT, lambda: picframe_signal_handler(signal.SIGINT, controller_ref))
+
+async def run_picframe_app(args=None):
+    """Main picframe application function."""
     logging.basicConfig(stream=sys.stdout, level=logging.INFO, format="%(asctime)s %(levelname)s [%(filename)s:%(lineno)d] %(message)s")
     logger = logging.getLogger(__name__)
     logger.info('starting %s', sys.argv)
     
-    # Initialize crash investigation if available
-    if CRASH_INVESTIGATION_AVAILABLE:
-        try:
-            crash_investigator = install_crash_handlers()
-            logger.info('Crash investigation enabled')
-        except Exception as e:
-            logger.warning('Failed to initialize crash investigation: %s', e)
-    else:
-        logger.info('Crash investigation not available - install psutil for enhanced crash detection')
-    
     # === Suppress logs from external libraries ===
     for noisy_logger in ['pyvips', 'urllib3', 'PIL', 'chardet', 'requests', 'exifread', 'pi3d', 'pi3lib', 'iptcinfo']:
-        logging.getLogger(noisy_logger).setLevel(logging.WARNING)
+        logging.getLogger(noisy_logger).setLevel(logging.ERROR)
     
-    parser = argparse.ArgumentParser()
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument("-i", "--initialize",
-                       help="creates standard file structure for picframe in destination directory",
-                       metavar=('DESTINATION_DIRECTORY'))
-    group.add_argument("-v", "--version", help="print version information",
-                       action="store_true")
-    group.add_argument("configfile", nargs='?', help="/path/to/configuration.yaml")
-    args = parser.parse_args()
+    # Parse arguments if not provided
+    if args is None:
+        parser = argparse.ArgumentParser()
+        group = parser.add_mutually_exclusive_group()
+        group.add_argument("-i", "--initialize",
+                           help="creates standard file structure for picframe in destination directory",
+                           metavar=('DESTINATION_DIRECTORY'))
+        group.add_argument("-v", "--version", help="print version information",
+                           action="store_true")
+        group.add_argument("configfile", nargs='?', help="/path/to/configuration.yaml")
+        args = parser.parse_args()
+    
+    # Handle special arguments
     if args.initialize:
         if os.geteuid() == 0:
             print("Don't run the initialize step with sudo. It might put the files in the wrong place!")
@@ -137,36 +152,43 @@ async def main():
                              'vlc']
         check_packages(required_packages)
         return
-    elif args.configfile:
+
+    # Initialize model and controller
+    if args.configfile:
         m = model.Model(args.configfile)
     else:
         m = model.Model()
 
-    logger.info('-------------------> model initialized with config: %s', m.get_model_config())
     v = viewer_display.ViewerDisplay(m.get_viewer_config())
     c = controller.Controller(m, v)
     
-    # Set up signal handlers for graceful shutdown
-    def signal_handler():
-        logger.info("Signal received, shutting down gracefully...")
-        c.keep_looping = False
-        # Call controller.stop() to ensure proper cleanup
-        c.stop()
-    
-    # Add signal handlers to the event loop
-    loop = asyncio.get_running_loop()
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, signal_handler)
-    
     await c.start()
+    # Set up signal handlers AFTER everything is initialized
+    controller_ref = [c]  # Use list for mutable reference
+    loop = asyncio.get_running_loop()
+    setup_signal_handlers(loop, controller_ref)
+    
     try:
         while c.keep_looping:
             await asyncio.sleep(1)
-    except (KeyboardInterrupt, asyncio.CancelledError):
-        pass
+    except asyncio.CancelledError:
+        logger.info("Main loop Cancelled")
+        raise
+    except KeyboardInterrupt:
+        logger.info("Main loop interrupted by KeyboardInterrupt")
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in main loop: {e}")
     finally:
-        c.stop()
+
+        maybe = c.stop()
+        if asyncio.iscoroutine(maybe):
+            await maybe
+
+async def main():
+    """Simple main function that calls the app."""
+    await run_picframe_app()
 
 if __name__ == "__main__":
-    import asyncio
+    print("Starting picframe from start.py...")
     asyncio.run(main())

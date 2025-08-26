@@ -23,6 +23,7 @@ if _PACKAGE_PARENT not in sys.path:
     sys.path.insert(0, _PACKAGE_PARENT)
 
 from picframe.start import main
+import signal
 
 
 TRACING = False  # Set to False to disable tracing
@@ -69,9 +70,10 @@ class StdIOTracker:               # Accounts for any lines from other loggers/ou
             self.write('\n')
         self.real_stream.flush()
 
-# Replace sys.stdout and sys.stderr
-sys.stdout = StdIOTracker(sys.stdout)
-sys.stderr = StdIOTracker(sys.stderr)
+# Only replace sys.stdout and sys.stderr when tracing is enabled
+if TRACING:
+    sys.stdout = StdIOTracker(sys.stdout)
+    sys.stderr = StdIOTracker(sys.stderr)
 
 def trace_calls(frame, event, arg):
     global SOURCE
@@ -119,8 +121,12 @@ def trace_calls(frame, event, arg):
     return trace_calls
 
 if __name__ == '__main__':
+    print(f"Picframe starting (PID: {os.getpid()}) - using asyncio signal handlers")
+    
     if TRACING:
         print("Starting picframe with tracing...")
         sys.settrace(trace_calls)
     sys.argv[0] = re.sub(r'(-script\.pyw|\.exe)?$', '', sys.argv[0])
-    sys.exit(asyncio.run(main()))
+    # Import the main app function instead of the generic main
+    from picframe.start import run_picframe_app
+    sys.exit(asyncio.run(run_picframe_app()))
