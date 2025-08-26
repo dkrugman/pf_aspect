@@ -1,4 +1,5 @@
 import os, time, yaml, logging, locale
+from pathlib import Path
 from picframe import geo_reverse, image_cache, import_photos
 
 DEFAULT_CONFIGFILE = "~/picframe_data/config/configuration.yaml"
@@ -220,21 +221,28 @@ class Model:
             self.__logger.error("error trying to set locale to {}".format(model_config['locale']))
 
         self.__pic_dir = os.path.expanduser(model_config['pic_dir'])
+        
+        # Ensure picture directory exists
+        pic_path = Path(self.__pic_dir)
+        pic_path.mkdir(parents=True, exist_ok=True)
+        self.__logger.debug(f"Picture directory ensured: {pic_path}")
+        
         self.__subdirectory = os.path.expanduser(model_config['subdirectory'])
         self.__load_geoloc = model_config['load_geoloc']
         self.__geo_reverse = geo_reverse.GeoReverse(model_config['geo_key'],
                                                     key_list=self.get_model_config()['key_list'])
+        # Ensure database directory exists
+        db_file_path = Path(os.path.expanduser(model_config['db_file']))
+        db_file_path.parent.mkdir(parents=True, exist_ok=True)
+        self.__logger.debug(f"Database directory ensured: {db_file_path.parent}")
+        
         self.__image_cache = image_cache.ImageCache(self.__pic_dir,
                                                     model_config['follow_links'],
-                                                    os.path.expanduser(model_config['db_file']),
+                                                    str(db_file_path),
                                                     self.__geo_reverse,
                                                     model_config['update_interval'],
-                                                    aspect_config.get('square_img', 'Landscape'))
-        # Give ImageCache a back-reference to this model for slideshow creation
-        try:
-            self.__image_cache.set_model(self)
-        except Exception:
-            pass
+                                                    aspect_config.get('square_img', 'Landscape'),
+                                                    model=self)
         self.__deleted_pictures = model_config['deleted_pictures']
         self.__no_files_img = os.path.expanduser(model_config['no_files_img'])
         self.__sort_cols = model_config['sort_cols']

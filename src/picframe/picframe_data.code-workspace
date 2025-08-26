@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "../../../picframe_data"
+		},
+		{
+			"path": "../.."
+		}
+	],
+	"settings": {
+		"workbench.commandPalette.experimental.enableNaturalLanguageSearch": false,
+		"search.defaultViewMode": "tree"
+	}
+}
