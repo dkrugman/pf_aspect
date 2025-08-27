@@ -105,17 +105,17 @@ class ProcessImages:
 
             # Calculate crop loss
             if category == "Landscape":
-                h_crop = resized.width - 2894
-                v_crop = resized.height - 2160
-                loss = h_crop/2894
+                h_crop = resized.width - self.target_width
+                v_crop = resized.height -self.target_height
+                loss = h_crop/self.target_width
             elif category == "Portrait":
-                h_crop = resized.width - 2160
-                v_crop = resized.height - 2894
-                loss = v_crop/2160
+                h_crop = resized.width - self.target_height
+                v_crop = resized.height - self.target_width
+                loss = v_crop/self.target_height
             else:
-                h_crop = resized.width -2894
-                v_crop = resized.height - 2160
-                loss = (h_crop/2894)*100
+                h_crop = resized.width - self.target_width
+                v_crop = resized.height - self.target_height
+                loss = (h_crop/self.target_width)*100
 
             self.__logger.info(f"{file.name}: {category}. {scale:.0%} - h crop: {h_crop/2} v crop: {v_crop/2} - LOSS: {loss:.0%}")
             self.__logger.debug(f"{file.name} → {category}, {resized.width}x{resized.height} → {output_file.name}")

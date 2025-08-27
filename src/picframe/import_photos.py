@@ -375,41 +375,45 @@ class ImportPhotos:
                     cur = self.__db.execute("SELECT media_item_id FROM imported_files WHERE source = ? AND playlist_id = ?", 
                                 (source, int(playlist_id)))
                     existing_media_ids = set(row[0] for row in cur.fetchall() if row[0])
-                    self.__logger.info(f"existing_media_ids: {existing_media_ids}")
+                    #self.__logger.info(f"existing_media_ids: {existing_media_ids}")
                     self.__logger.info(f"Found {len(existing_media_ids)} existing media items in database for playlist {playlist_name}")
                 except Exception as e:
                     self.__logger.warning(f"Error querying database for existing media: {e}")
-                    existing_media_ids = set()  # fallback to empty set
             
             slides = []
-            total_slides = 0
-            skipped_slides = 0
-            
+            matched_slides = unmatched_slides = duplicates = 0
             # Handle different JSON response structures
             media_list = json if isinstance(json, list) else json.get(item_path, [])
+            total_in_playlist = len(media_list)
+            
+            # Use seen_ids - a set() - to remove duplicates
+            seen_ids = set()       
             
             for slide in media_list:
                 if isinstance(slide, dict) and "mediaItemId" in slide:
-                    total_slides += 1
                     media_id = slide["mediaItemId"]
-                    
-                    # Only add if not already in database
-                    if src_version == -1 or media_id not in existing_media_ids:
-                        data = {
-                            "mediaItemId": media_id,
-                            "mediaType": slide.get("mediaType", ""),
-                            "originalUrl": slide.get("originalUrl", ""),
-                            "caption": slide.get("caption", ""),
-                            "timestamp": slide.get("timestamp", ""),
-                            "filename": slide.get("filename", ""),
-                            "playlist_id": playlist_id,
-                            "playlist_name": playlist_name
-                        }
-                        slides.append(data)
+                    if media_id not in seen_ids:
+                        seen_ids.add(media_id)
+                        # Only add if not already in database
+                        if src_version == -1 or media_id not in existing_media_ids:
+                            data = {
+                                "mediaItemId": media_id,
+                                "mediaType": slide.get("mediaType", ""),
+                                "originalUrl": slide.get("originalUrl", ""),
+                                "caption": slide.get("caption", ""),
+                                "timestamp": slide.get("timestamp", ""),
+                                "filename": slide.get("filename", ""),
+                                "playlist_id": playlist_id,
+                                "playlist_name": playlist_name
+                            }
+                            slides.append(data)
+                            unmatched_slides += 1
+                        else:
+                            matched_slides += 1
                     else:
-                        skipped_slides += 1
+                        duplicates += 1
             
-            self.__logger.info(f"Playlist {playlist_name}: {total_slides} total, {len(slides)} new, {skipped_slides} already exist")
+            self.__logger.info(f"Playlist {playlist_name}: {total_in_playlist} total, {unmatched_slides} new, {matched_slides} already exist, {duplicates} are duplicates")
             return slides
                 
         except Exception as e:
@@ -459,6 +463,10 @@ class ImportPhotos:
         full_name = f"{basename}.{extension}"
         local_path = import_dir_path / full_name
 
+        orig_extension = extension
+        processed = 0
+        orig_timestamp = timestamp
+
         try:
             # Download file in thread pool to avoid blocking
             loop = asyncio.get_event_loop()
@@ -469,7 +477,7 @@ class ImportPhotos:
             self.__logger.debug(f"Inserting into database: source: {source}, playlist_id: {playlist_id}, media_item_id: {media_id}")
             
             # Run database operation in thread pool too
-            await loop.run_in_executor(None, self._insert_file_record, source, playlist_id, media_id, url, basename, extension, nix_caption, timestamp, local_path)
+            await loop.run_in_executor(None, self._insert_file_record, source, playlist_id, media_id, url, basename, extension, nix_caption, orig_extension, processed, orig_timestamp, local_path)    
             
         except Exception as e:
             self.__logger.error(f"Failed to download {url}: {e}")
@@ -481,7 +489,7 @@ class ImportPhotos:
         with open(local_path, 'wb') as f:
             shutil.copyfileobj(response.raw, f)
 
-    def _insert_file_record(self, source, playlist_id, media_id, url, basename, extension, nix_caption, timestamp, local_path):
+    def _insert_file_record(self, source, playlist_id, media_id, url, basename, extension, nix_caption, orig_extension, processed, orig_timestamp, local_path):
         """Synchronous database insert to run in thread pool."""
         # Create a separate connection for this thread to avoid transaction conflicts
         db = sqlite3.connect(self.__db_file, check_same_thread=False, timeout=10.0)
@@ -498,9 +506,9 @@ class ImportPhotos:
                     basename,
                     extension,  # may be changed to .jpg in later processing
                     nix_caption,
-                    extension,  # original extension same as stored
-                    0,
-                    unix_to_utc_string(timestamp),
+                    orig_extension,  # original extension same as stored
+                    processed,
+                    orig_timestamp,
                     unix_to_utc_string(int(os.path.getmtime(local_path)))
                 ))
         except Exception as e:
@@ -543,61 +551,3 @@ if __name__ == '__main__':
     print("This script is designed to be used as a module, not run directly.")
     print("Use run_import_photos.py (or nix.py) instead for standalone Nixplay import functionality.")
     sys.exit(1) 
-    
-# LOGIN
-    try:
-        session = importer.create_authorized_client(importer.username, importer.password, importer.login_url)
-        if session.cookies.get("prod.session.id") is None:
-            raise LoginError("Bad Credentials")
-    except LoginError as e:
-        print(f"Login failed: {e}")
-        print("Exiting")
-        sys.exit()
-    except Exception as e:
-        print(f"An error occurred: {e}")
-    print("logged in")
-
-# GET PLAYLIST NAMES 
-    playlists = []
-    try:
-        playlists = importer.get_playlist_names(session, importer.playlist_url, importer.frame_key)
-
-    except Exception as e:
-        print(f"An error occurred: {e}")
-    print("got playlists")
-# CHECK OR CREATE SUBDIRECTORIES
-    print("checking for playlist updates")
-    playlists_to_update = []
-    for playlist in playlists:
-        folder_name = create_valid_folder_name(str(playlist["id"]))
-        subdirectory = os.path.expanduser(importer.local_pictures_path + '/imports/' + folder_name + "/")
-        
-        if os.path.isdir(subdirectory):  # Directory exists - add to update list
-            playlists_to_update.append((playlist["id"], playlist["playlist_name"], subdirectory))
-        else:
-            try:                         # Create new directory - no need to check version since it's new
-                os.makedirs(subdirectory, mode=0o700, exist_ok=False)
-                if wait_for_directory(subdirectory, timeout=10):
-                    playlists_to_update.append((playlist["id"], playlist["playlist_name"], subdirectory))
-                    print("created new directories")
-                else:
-                    print("Creating new playlist directory timed out")
-            except Exception as e:
-                print(f"Directory creation failed: {e}")
-    
-    if not playlists_to_update:
-        print("Nothing to update - exiting early")
-        sys.exit(0)      
-
-    try:
-        print("playlists_to_update", playlists_to_update)
-        media_items, last_version = importer.get_playlist_media(session, importer.playlist_url, importer.item_path, playlists_to_update, db)
-        print(f"Retrieved {len(media_items)} new media items to process")
-        # TODO: Update version after import is complete
-    except Exception as e:
-        print(f"An error occurred: {e}")
-    
-    # Close database connection
-    if 'db' in locals():
-        db.close()
-        print("Database connection closed")
