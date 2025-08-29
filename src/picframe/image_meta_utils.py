@@ -1,4 +1,4 @@
-from picframe.get_image_meta import GetImageMeta
+from .get_image_meta import GetImageMeta
 import os
 from datetime import datetime
 

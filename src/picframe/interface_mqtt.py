@@ -21,8 +21,8 @@ import os
 import ssl
 from typing import Optional, List
 import paho.mqtt.client as mqtt
-from picframe import __version__
-from picframe.controller import Controller
+from . import __version__
+from .controller import Controller
 
 
 class InterfaceMQTT:

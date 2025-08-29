@@ -12,9 +12,9 @@ import ssl
 import asyncio
 from datetime import datetime
 from .async_timer import init_timer
-from picframe.interface_peripherals import InterfacePeripherals
-from picframe import import_photos
-from picframe import process_images
+from .interface_peripherals import InterfacePeripherals
+from . import import_photos
+from . import process_images
 import os
 
 def make_date(txt: str) -> float:
@@ -166,14 +166,14 @@ class Controller:
         self.__timer.start()
 
         if self.__mqtt_config['use_mqtt']:
-            from picframe import interface_mqtt
+            from . import interface_mqtt
             try:
                 self.__interface_mqtt = interface_mqtt.InterfaceMQTT(self, self.__mqtt_config)
             except Exception as e:
                 self.__logger.error("Can't initialize MQTT: %s. Continuing without MQTT.", e)
 
         if self.__http_config['use_http']:
-            from picframe import interface_http
+            from . import interface_http
             model_config = self.__model.get_model_config()
             try:
                 self.__interface_http = interface_http.InterfaceHttp(

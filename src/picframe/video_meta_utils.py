@@ -5,7 +5,7 @@ Provides utility to extract video metadata for ImageCache ingestion.
 """
 
 import os
-from picframe.video_streamer import get_video_info
+from .video_streamer import get_video_info
 
 def get_video_metadata(file_path_name: str) -> dict:
     """
