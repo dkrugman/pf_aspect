@@ -78,7 +78,7 @@ class NewSlideshow:
             }
 
             try:
-                self.__logger.info(f"Fetching {current_batch} random indices from Random.org...")
+                self.__logger.debug(f"Fetching {current_batch} random indices from Random.org...")
                 res = requests.post(self.api_url, json=payload, timeout=10)
                 res.raise_for_status()
                 result = res.json()
@@ -198,7 +198,7 @@ class NewSlideshow:
             self.__logger.warning(f"Error saving slideshow: {e}")
 
     def generate_slideshow(self):
-        self.__logger.info("Loading image list from database...")
+        self.__logger.debug("Loading image list from database...")
         
         file_data = self.fetch_file_ids()
         if not file_data:
@@ -214,10 +214,10 @@ class NewSlideshow:
         else:
             self.__logger.info("Shuffle disabled. Using original order.")
 
-        self.__logger.info("Building alternating groups...")
+        self.__logger.debug("Building alternating groups...")
         groups = self.build_groups_dynamic(file_ids, folder_map)
 
-        self.__logger.info("Writing slideshow table...")
+        self.__logger.debug("Writing slideshow table...")
         self.save_to_slideshow(groups)
 
         self.__logger.info(f"Done. Created {len(groups)} groups.")

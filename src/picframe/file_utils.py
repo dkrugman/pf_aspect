@@ -24,9 +24,12 @@ def parse_filename_metadata(filename, configured_sources=None):
     logger = logging.getLogger(__name__)
     
     # Parse filename to extract source and playlist
-    # Format: source-playlist-...
+    # Format: source_playlist_...
     if isinstance(filename, Path):
         filename = filename.name
+    else:
+        # Ensure we only use the basename, not full path
+        filename = os.path.basename(str(filename))
     
     parts = filename.split('_')
     

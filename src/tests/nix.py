@@ -7,8 +7,8 @@ class LoginError(Exception):
 class ImportPhotos:
     """Class to import photos from third-party services to local filesystem."""
     def __init__(self):
-        self.username = ""
-        self.password = ""
+        self.username = os.getenv('NIXPLAY_USERNAME', "")
+        self.password = os.getenv('NIXPLAY_PASSWORD', "")
         self.login_url = "https://api.nixplay.com/www-login/"
         self.playlist_url = "https://api.nixplay.com/v3/playlists/"
         self.item_path = "slides"  # url is: playlist_url + list_id + '/' + item_path
@@ -143,12 +143,23 @@ if __name__ == '__main__':
     
     importer = ImportPhotos()                           # Instantiate ImportPhotos class with configuration 
     
+    # Check for required credentials
+    if not importer.username or not importer.password:
+        print("Error: NIXPLAY_USERNAME and NIXPLAY_PASSWORD environment variables must be set")
+        print("Set them with: export NIXPLAY_USERNAME='your_email' && export NIXPLAY_PASSWORD='your_password'")
+        sys.exit(1)
+    
     # Setup database connection
     db_file = "~/picframe_data/data/pictureframe.db3" 
-    db = sqlite3.connect(os.path.expanduser(db_file), check_same_thread=False, timeout=5.0)
-    db.execute("PRAGMA journal_mode=DELETE")
+    db = sqlite3.connect(os.path.expanduser(db_file), check_same_thread=False, timeout=30.0)
+    db.row_factory = sqlite3.Row
+    db.execute("PRAGMA journal_mode=WAL")
     db.execute("PRAGMA synchronous=NORMAL")
     db.execute("PRAGMA foreign_keys=ON")
+    db.execute("PRAGMA busy_timeout=30000")
+    db.execute("PRAGMA temp_store=MEMORY")
+    db.execute("PRAGMA mmap_size=30000000000")
+    db.execute("PRAGMA cache_size=10000")
     print("Database connection established")
 
 # LOGIN

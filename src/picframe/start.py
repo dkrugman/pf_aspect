@@ -84,9 +84,8 @@ def picframe_signal_handler(signum, controller_ref):
             logger.info("Calling controller.stop() from signal handler...")
             controller_ref[0].stop()
             logger.info("Controller stop() completed from signal handler")
-            # Force a small delay to ensure database cleanup completes
-            import time
-            time.sleep(1)
+            # Mark that stop has been called to prevent duplicate calls
+            controller_ref[0]._stop_called = True
             
         except Exception as e:
             logger.error(f"Error in signal handler: {e}")
@@ -180,10 +179,13 @@ async def run_picframe_app(args=None):
     except Exception as e:
         logger.error(f"Unexpected error in main loop: {e}")
     finally:
-
-        maybe = c.stop()
-        if asyncio.iscoroutine(maybe):
-            await maybe
+        # Only call stop() if it hasn't been called already by the signal handler
+        if not getattr(c, '_stop_called', False):
+            maybe = c.stop()
+            if asyncio.iscoroutine(maybe):
+                await maybe
+        else:
+            logger.info("Controller already stopped by signal handler, skipping duplicate stop call")
 
 async def main():
     """Simple main function that calls the app."""

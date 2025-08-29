@@ -81,11 +81,16 @@ class ImportPhotos:
         self.__db_file = os.path.expanduser(model_config['db_file'])
         self.__import_dir = self.__model.get_aspect_config()["import_dir"]
         self._importing = False
-        self.__db = sqlite3.connect(self.__db_file, check_same_thread=False, timeout=5.0)
+        self.__db = sqlite3.connect(self.__db_file, check_same_thread=False, timeout=30.0)
+        self.__db.row_factory = sqlite3.Row
         # Use WAL mode for better concurrency, DELETE for compatibility with DB Browser for SQLite
-        self.__db.execute("PRAGMA journal_mode=DELETE")
+        self.__db.execute("PRAGMA journal_mode=WAL")
         self.__db.execute("PRAGMA synchronous=NORMAL")
         self.__db.execute("PRAGMA foreign_keys=ON")
+        self.__db.execute("PRAGMA busy_timeout=30000")
+        self.__db.execute("PRAGMA temp_store=MEMORY")
+        self.__db.execute("PRAGMA mmap_size=30000000000")
+        self.__db.execute("PRAGMA cache_size=10000")
         create_schema(self.__db)
         
         # Thread pool for CPU-bound operations
@@ -94,7 +99,7 @@ class ImportPhotos:
     async def check_for_updates(self) -> None:
         """Main async method to check for updates and import photos."""
         if self._importing:
-            self.__logger.info("Import already in progress, skipping.")
+            self.__logger.debug("Import already in progress, skipping.")
             return
             
         self._importing = True
