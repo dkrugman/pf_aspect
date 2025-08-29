@@ -10,9 +10,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlencode, urlparse
 from requests.exceptions import HTTPError
-from picframe.process_images import ProcessImages
-from picframe.file_utils import extract_filename_and_ext, unix_to_utc_string, wait_for_directory, create_valid_folder_name
-from picframe.config import DB_JRNL_MODE
+from .process_images import ProcessImages
+from .file_utils import extract_filename_and_ext, unix_to_utc_string, wait_for_directory, create_valid_folder_name
+from .config import DB_JRNL_MODE
 from threading import Lock
 
 class LoginError(Exception):
@@ -749,7 +749,7 @@ class ImportPhotos:
     async def _process_single_image_async(self, file_path):
         """Process a single image asynchronously."""
         try:
-            from picframe.process_images import ProcessImages
+            from .process_images import ProcessImages
             
             processor = ProcessImages(self.__model)
             await processor.process_single_image_async(file_path)

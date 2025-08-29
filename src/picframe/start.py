@@ -1,6 +1,6 @@
 import sys, os, logging, locale, argparse, asyncio, signal
 from shutil import copytree
-from picframe import model, viewer_display, controller, __version__
+from . import model, viewer_display, controller, __version__
 
 # Global imports and setup
 

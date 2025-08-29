@@ -4,8 +4,8 @@ from typing import Optional, List, Tuple
 from datetime import datetime
 from PIL import Image, ImageFilter, ImageFile, ImageOps
 import numpy as np
-from picframe import mat_image, get_image_meta
-from picframe.video_streamer import VideoStreamer, VIDEO_EXTENSIONS, VideoFrameExtractor
+from . import mat_image, get_image_meta
+from .video_streamer import VideoStreamer, VIDEO_EXTENSIONS, VideoFrameExtractor
 
 # supported display modes for display switch
 dpms_mode = ("unsupported", "pi", "x_dpms")
@@ -206,7 +206,7 @@ class ViewerDisplay:
         if self.__image_overlay:
             self.__image_overlay.set_alpha(val)
         if self.__textblock:  
-            __textblock.sprite.set_alpha(val)
+            self.__textblock.sprite.set_alpha(val)
 
     def get_brightness(self):
         return round(self.__slide.unif[55], 2)  # this will still give 32/64 bit differences sometimes, as will the float(format()) system # noqa: E501
@@ -569,7 +569,7 @@ class ViewerDisplay:
         loop_running = False
         if fade_time > time_delay:
             self.__logger.warning("Fade time %f is longer than time delay %f, setting fade time to half of display time", fade_time, time_delay)  # noqa: E501
-            fade_time = display_time / 2
+            fade_time = time_delay / 2
 
         end_time = time.time() + fade_time 
         while time.time() < end_time + .5:           

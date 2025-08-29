@@ -11,12 +11,8 @@ import io
 import socket
 from PIL import Image
 
-try:
-    from http.server import BaseHTTPRequestHandler, HTTPServer  # py3
-    import urllib.parse as urlparse
-except ImportError:
-    from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer  # py2
-    import urlparse
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import urllib.parse as urlparse
 
 try:
     from pi_heif import register_heif_opener
@@ -187,7 +183,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     extension = os.path.splitext(page)[1].lower()
                     content_type = EXTENSION_TO_MIMETYPE.get(extension, 'application/octet-stream')
                     if html_page != "current_image_original":
-                        from picframe.video_streamer import VIDEO_EXTENSIONS
+                        from .video_streamer import VIDEO_EXTENSIONS
                         if extension in ('.heic', '.heif'):
                             # as current_image may be heic
                             image = heif_to_image(page)

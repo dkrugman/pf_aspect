@@ -21,7 +21,7 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Awaitable, Optional
-from picframe.config import DB_JRNL_MODE
+from .config import DB_JRNL_MODE
 
 class AsyncTimerManager:
     def __init__(self, model):

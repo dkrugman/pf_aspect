@@ -25,8 +25,8 @@ import ntplib
 import pytz
 import urllib3
 
-from picframe.schema import create_schema
-from picframe.process_images import ProcessImages
+from .schema import create_schema
+from .process_images import ProcessImages
 
 
 def extract_filename_and_ext(url_or_path):

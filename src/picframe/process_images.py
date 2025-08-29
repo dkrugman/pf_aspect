@@ -1,9 +1,9 @@
 import os, logging, exifread, pyvips, asyncio, sqlite3
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
-from picframe.interface_http import EXTENSIONS
-from picframe.file_utils import parse_filename_metadata
-from picframe.config import DB_JRNL_MODE
+from .interface_http import EXTENSIONS
+from .file_utils import parse_filename_metadata
+from .config import DB_JRNL_MODE
 
 class ProcessImages:
     LOG_FILE = "resize_log.txt"
