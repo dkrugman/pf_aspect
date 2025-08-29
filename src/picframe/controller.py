@@ -29,7 +29,7 @@ class Controller:
     def __init__(self, model, viewer):
         self.__logger = logging.getLogger(__name__)
         self.__logger.setLevel(model.get_model_config()['log_level'])
-        self.__logger.info('Creating an instance of Controller')
+        self.__logger.debug('Creating an instance of Controller')
 
         self.__model = model
         self.__viewer = viewer
@@ -45,6 +45,7 @@ class Controller:
 
         self.publish_state = lambda x, y: None
         self.keep_looping = True
+        self._stop_called = False  # Flag to prevent duplicate stop calls
 
         self.__interface_peripherals = None
         self.__interface_mqtt = None
@@ -65,9 +66,9 @@ class Controller:
             self.publish_state()
 
     async def next(self):
-        self.__logger.info("Timer fired: next() called")
+        self.__logger.debug("Timer fired: next() called")
         if self.paused:
-            self.__logger.info("Slideshow is paused, returning")
+            self.__logger.debug("Slideshow is paused, returning")
             return
 
         if self.__viewer.is_video_playing():
@@ -131,7 +132,7 @@ class Controller:
                 
                 # Check if already importing
                 if importer.is_importing():
-                    self.__logger.info("Import already in progress...")
+                    self.__logger.debug("Import already in progress...")
                     return
                 
                 # Start the import process
@@ -287,7 +288,7 @@ class Controller:
             script_path = sys.argv[0] if hasattr(sys, 'argv') and sys.argv else None
             
             if script_path and os.path.exists(script_path):
-                self.__logger.info("Replacing current process with new picframe instance...")
+                self.__logger.debug("Replacing current process with new picframe instance...")
                 
                 # Use exec to replace the current process instead of starting a new one
                 # This ensures only one process exists at a time
@@ -304,14 +305,24 @@ class Controller:
             # Continue running without HTTP interface rather than crashing
 
     def stop(self):
-        self.__logger.info("Stopping picframe controller...")
+        self.__logger.debug("Stopping picframe controller...")
         self.keep_looping = False
+        
+        # Stop timer FIRST to cancel all running tasks (including import)
+        if hasattr(self, '_Controller__timer') and self._Controller__timer:
+            try:
+                self._Controller__timer.stop()
+                self.__logger.debug("Controller timer stopped")
+            except Exception as e:
+                self.__logger.error(f"Error stopping controller timer: {e}")
+        else:
+            self.__logger.warning("No controller timer found")
         
         # Import task is now handled by timer, no need to cancel separately
         
         # Cleanup ImportPhotos database connections
         if hasattr(self, '_import_photos') and self._import_photos:
-            self.__logger.info("Cleaning up ImportPhotos...")
+            self.__logger.debug("Cleaning up ImportPhotos...")
             try:
                 self._import_photos.cleanup()
             except Exception as e:
@@ -319,7 +330,7 @@ class Controller:
         
         # Stop peripheral interface if it exists
         if hasattr(self, '__interface_peripherals') and self.__interface_peripherals:
-            self.__logger.info("Stopping peripheral interface...")
+            self.__logger.debug("Stopping peripheral interface...")
             try:
                 self.__interface_peripherals.stop()
             except Exception as e:
@@ -327,7 +338,7 @@ class Controller:
         
         # Stop MQTT interface if it exists
         if hasattr(self, '__interface_mqtt') and self.__interface_mqtt:
-            self.__logger.info("Stopping MQTT interface...")
+            self.__logger.debug("Stopping MQTT interface...")
             try:
                 self.__interface_mqtt.stop()
             except Exception as e:
@@ -335,32 +346,12 @@ class Controller:
         
         # Stop HTTP interface if it exists
         if hasattr(self, '__interface_http') and self.__interface_http:
-            self.__logger.info("Stopping HTTP interface...")
+            self.__logger.debug("Stopping HTTP interface...")
             try:
                 self.__interface_http.stop()
             except Exception as e:
                 self.__logger.error(f"Error stopping HTTP interface: {e}")
-        
-        # Stop timer if it exists - try both instance timer and global timer
-        timer_stopped = False
-        if hasattr(self, '__timer') and self.__timer:
-            try:
-                self.__timer.stop()
-                timer_stopped = True
-            except Exception as e:
-                self.__logger.error(f"Error stopping instance timer: {e}")
-        
-        # If instance timer wasn't available, try global timer
-        if not timer_stopped:
-            try:
-                from .async_timer import timer as global_timer
-                if global_timer:
-                    global_timer.stop()
-                else:
-                    self.__logger.warning("No global timer found")
-            except Exception as e:
-                self.__logger.error(f"Error stopping global timer: {e}")
-        
+                
         # Stop model components
         try:
             self.__model.stop_image_cache()
@@ -379,9 +370,10 @@ class Controller:
         except Exception as e:
             self.__logger.error(f"Error re-enabling cursor: {e}")
         
-        self.__logger.info("Picframe controller stopped successfully")
+        self.__logger.debug("Picframe controller stopped successfully")
 
     def __signal_handler(self, sig, frame):
         msg = 'Ctrl-c pressed, stopping picframe...' if sig == signal.SIGINT else f'Signal {sig} received, stopping picframe...'
+        self.stop()
         self.__logger.info(msg)
         self.keep_looping = False

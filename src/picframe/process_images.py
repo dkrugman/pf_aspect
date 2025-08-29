@@ -1,16 +1,13 @@
-import os
-import logging
-import exifread
-import pyvips
-import asyncio
+import os, logging, exifread, pyvips, asyncio, sqlite3
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from picframe.interface_http import EXTENSIONS
 from picframe.file_utils import parse_filename_metadata
+from picframe.config import DB_JRNL_MODE
 
 class ProcessImages:
     LOG_FILE = "resize_log.txt"
-    MAX_WORKERS = 10  # Number of threads
+    MAX_WORKERS = 3   # Number of threads - reduced to prevent database locking
 
     def __init__(self, model):
         self.__logger = logging.getLogger(__name__)
@@ -25,9 +22,27 @@ class ProcessImages:
         # === Ensure output subfolders exist ===
         for orientation in ["Landscape", "Portrait", "Square"]:
             (self.picture_dir / orientation).mkdir(parents=True, exist_ok=True)
+        
+        self.__db = sqlite3.connect(self.db_file, check_same_thread=False, timeout=30.0)
+         # Configure main connection
+        self.__db.execute(f"PRAGMA journal_mode={DB_JRNL_MODE}")
+        self.__db.execute("PRAGMA synchronous=NORMAL")
+        self.__db.execute("PRAGMA foreign_keys=ON")
+        self.__db.execute("PRAGMA busy_timeout=30000")
+        self.__db.execute("PRAGMA temp_store=MEMORY")
+        self.__db.execute("PRAGMA mmap_size=30000000000")
+        self.__db.execute("PRAGMA cache_size=10000")
+        self.__logger.debug("ProcessImages database connection established")
+        
+        # Additional database configuration for better concurrency
+        self.__db.execute("PRAGMA locking_mode=EXCLUSIVE")
+        self.__db.execute("PRAGMA cache_size=-64000")  # 64MB cache
 
     # === EXIF orientation parser ===
     def get_exif_corrected_dimensions(self, filepath):
+        # Ensure filepath is a string, not bytes
+        filepath = str(filepath)  # This handles both bytes and Path objects
+        
         try:
             with open(filepath, 'rb') as f:
                 tags = exifread.process_file(f, stop_tag='Image Orientation', details=False)
@@ -61,21 +76,51 @@ class ProcessImages:
                 
             # Add to database
             try:
-                self.add_to_db(processed_file)
+                with self.__db: 
+                    self.add_to_db(processed_file)
                 self.__logger.info(f"Successfully processed {file.name}")
+                # Only delete original file after successful database addition
+                file.unlink()
+                self.__logger.info(f"Deleted imported file: {file}")
             except Exception as e:
                 self.__logger.error(f"Failed to add {file.name} to database: {e}")
                 return
                 
         except Exception as e:
             self.__logger.error(f"Failed to process {file.name}: {e}")
-        finally:
-            # Always try to delete the original file, regardless of processing success
+
+    async def process_single_image_async(self, file_path):
+        """Process a single image asynchronously."""
+        try:
+            # Convert string path to Path object if needed
+            if isinstance(file_path, str):
+                file_path = Path(file_path)
+            
+            self.__logger.info(f"Starting async processing of {file_path.name}")
+            
+            # Process the image
+            scaled_file = self.classify_and_scale(file_path)
+            if scaled_file is None:
+                self.__logger.warning(f"Failed to classify and scale {file_path.name}")
+                return
+                
+            processed_file = self.smart_crop(scaled_file)
+            if processed_file is None:
+                self.__logger.warning(f"Failed to smart crop {file_path.name}")
+                return
+                
+            # Add to database and clean up
             try:
-                file.unlink()
-                self.__logger.info(f"Deleted imported file: {file}")
+                with self.__db: 
+                    self.add_to_db(processed_file)
+                self.__logger.info(f"Successfully processed {file_path.name}")
+                file_path.unlink()
+                self.__logger.info(f"Deleted imported file: {file_path}")
             except Exception as e:
-                self.__logger.error(f"Failed to delete {file}: {e}")
+                self.__logger.error(f"Failed to add {file_path.name} to database: {e}")
+                
+        except Exception as e:
+            self.__logger.error(f"Failed to process {file_path.name}: {e}")
 
     def classify_and_scale(self, file):
         try:
@@ -101,7 +146,16 @@ class ProcessImages:
             resized = image.resize(scale)
 
             output_file = self.picture_dir / category / file.name
-            resized.write_to_file(str(output_file), Q=100 )
+             # Add debug logging
+            self.__logger.debug(f"Attempting to save to: {output_file}")
+            self.__logger.debug(f"Output file type: {type(output_file)}")
+            self.__logger.debug(f"Output file path: {str(output_file)}")
+            try:
+                resized.write_to_file(str(output_file), Q=100 )
+            except Exception as e:
+                self.__logger.error(f"Save error details: {e}")
+                self.__logger.error(f"Save error type: {type(e)}")
+                raise
 
             # Calculate crop loss
             if category == "Landscape":
@@ -124,7 +178,8 @@ class ProcessImages:
 
         except Exception as e:
             self.__logger.error(f"Failed to classify and scale {file.name}: {e}")
-            return None
+            self.__logger.error(f"Exception type: {type(e)}")
+            
 
     def smart_crop(self, file):
         if file is None:
@@ -144,7 +199,7 @@ class ProcessImages:
         # Get the image cache from the model
         image_cache = self.model.get_image_cache()
         # Convert Path object to string and insert into database
-        filename = str(file.name)
+        filename = str(file)
         source, playlist = self.parse_filename(filename)
         
         # Use non-blocking async insertion for better performance
@@ -162,10 +217,6 @@ class ProcessImages:
         # and it will get processed.
         configured_sources = self.model.get_aspect_config().get("sources", {})
         return parse_filename_metadata(filename, configured_sources)
-
-
-
-
 
         # === Batch run with parallel threads ===
     async def process_images(self):
@@ -188,4 +239,13 @@ class ProcessImages:
         tasks = [sem_task(file) for file in files]
         await asyncio.gather(*tasks)
 
-        self.__logger.info("Done.")
+        self.__logger.info("Process Images Done.")
+
+    def cleanup(self):
+        """Clean up database connection."""
+        try:
+            if hasattr(self, '__db') and self.__db:
+                self.__db.close()
+                self.__logger.debug("ProcessImages database connection closed")
+        except Exception as e:
+            self.__logger.warning(f"Error closing ProcessImages database: {e}")    

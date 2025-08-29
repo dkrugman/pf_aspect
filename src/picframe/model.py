@@ -457,7 +457,7 @@ class Model:
             # Return next image from slideshow
             pic = self.__image_cache.get_next_file_from_slideshow()
             if pic:
-                # Set played = 1 for this image
+                # Set played = 1 for this image, increment display count and set last_displayed to current time
                 self.__image_cache.set_played_for_image(pic.file_id)
             # if no more images, create new slideshow
             if self.__image_cache.get_next_file_from_slideshow() is None:

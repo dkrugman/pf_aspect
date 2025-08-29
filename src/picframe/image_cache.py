@@ -6,13 +6,14 @@ import threading
 
 from pathlib import Path
 from datetime import datetime
-from picframe.get_image_meta import GetImageMeta
-from picframe.video_streamer import VIDEO_EXTENSIONS
-from picframe.image_meta_utils import get_exif_info
-from picframe.video_meta_utils import get_video_metadata
-from picframe.file_time_utils import get_file_birth_time, get_file_times, is_birth_time_available
-from picframe.file_utils import parse_filename_metadata
-import picframe.schema as schema
+from .get_image_meta import GetImageMeta
+from .video_streamer import VIDEO_EXTENSIONS
+from .image_meta_utils import get_exif_info
+from .video_meta_utils import get_video_metadata
+from .file_time_utils import get_file_birth_time, get_file_times, is_birth_time_available
+from .file_utils import parse_filename_metadata
+from . import schema
+from .config import DB_JRNL_MODE
 
 class ImageCache:
 
@@ -39,18 +40,18 @@ class ImageCache:
         self.__db_file = db_file
         self.__geo_reverse = geo_reverse
         self.__update_interval = update_interval
-        
 
-
-        self.__db = sqlite3.connect(self.__db_file, check_same_thread=False, timeout=10.0)
+        self.__db = sqlite3.connect(self.__db_file, check_same_thread=False, timeout=30.0)
         self.__db.row_factory = sqlite3.Row
-        # Use DELETE mode for compatibility with DB Browser for SQLite
-        self.__db.execute("PRAGMA journal_mode=DELETE")
+        
+        self.__db.execute(f"PRAGMA journal_mode={DB_JRNL_MODE}")
         self.__db.execute("PRAGMA synchronous=NORMAL")
         self.__db.execute("PRAGMA foreign_keys=ON")
-        # Optimizations that work with DELETE mode
-        self.__db.execute("PRAGMA cache_size=10000")  # Larger cache
-        self.__db.execute("PRAGMA temp_store=MEMORY")  # Use memory for temp storage
+        self.__db.execute("PRAGMA busy_timeout=30000")
+        self.__db.execute("PRAGMA temp_store=MEMORY")
+        self.__db.execute("PRAGMA mmap_size=30000000000")
+        # Optimizations
+        self.__db.execute("PRAGMA cache_size=10000")
 
         self.__modified_folders = []
         self.__modified_files = []
@@ -128,7 +129,7 @@ class ImageCache:
         row = cur.fetchone()
         if row:
             # Import Pic class
-            from picframe.model import Pic
+            from .model import Pic
             return Pic(
                 fname=row['fname'],
                 last_modified=row['last_modified'],
@@ -157,38 +158,41 @@ class ImageCache:
         return None
         
     def set_played_for_image(self, file_id):
-        """Set played = 1 for the given file_id."""
-        cur = self.__db.cursor()
-        cur.execute("UPDATE slideshow SET played = 1 WHERE file_id = ?", (file_id,))
-        self.__db.commit()
+        """Set played = 1 for the given file_id. Also increment displayed_count and set last_displayed to current time."""
+        try:
+            with self.__db:  # auto-commit
+                self.__db.execute("UPDATE slideshow SET played = 1 WHERE file_id = ?", (file_id,))
+                self.__db.execute("UPDATE file SET displayed_count = displayed_count + 1, last_displayed = ? WHERE file_id = ?", 
+                         (time.time(), file_id))
+        except Exception as e:
+            self.__logger.warning(f"Error updating file display count: {e}")
+        return
 
     def create_new_slideshow(self):
         """Create a new slideshow using the NewSlideshow class."""
         # Prevent re-entrancy if called concurrently (e.g., by a timer)
         self.__logger.debug("CREATE_NEW_SLIDESHOW called ********************************")
         if getattr(self, "_creating_new_slideshow", False):
-            self.__logger.info("CREATING NEW SLIDESHOW ATTR NOT FOUND")
+            self.__logger.debug("CREATING NEW SLIDESHOW ATTR NOT FOUND")
         elif self._creating_new_slideshow:
             self.__logger.debug("Slideshow creation already in progress; skipping new request.")
             return
         self._creating_new_slideshow = True
         try:
-            from picframe.create_new_slideshow import NewSlideshow
+            from .create_new_slideshow import NewSlideshow
             # We need to pass a model instance, but ImageCache doesn't have direct access to it
             # For now, we'll create a simple slideshow without the full NewSlideshow functionality
             if self.__model is None:
                 self.__logger.warning("Model reference not set on ImageCache; cannot create slideshow")
                 return None
-            self.__logger.info("Calling NewSlideshow(model).generate_slideshow()...")
+            self.__logger.debug("Calling NewSlideshow(model).generate_slideshow()...")
             ns = NewSlideshow(self.__model)
             ns.generate_slideshow()
-            self.__logger.info("New slideshow creation invoked")
+            self.__logger.info("New slideshow creation completed")
         except Exception as e:
             self.__logger.warning(f"Error creating new slideshow: {e}")
         finally:
             self._creating_new_slideshow = False
-
-
 
     def pause_looping(self, value):
         self.__pause_looping = value
@@ -245,43 +249,6 @@ class ImageCache:
 
         except Exception:
             return []
-
-    def get_file_info(self, file_id):
-        if not file_id:
-            return None
-        sql = f"SELECT * FROM all_data where file_id = {file_id}"
-        row = self.__db.execute(sql).fetchone()
-        creation_time = self.get_file_creation_time_linux(row['fname'])
-        if creation_time:
-            self.__logger.debug(f"Creation time of '{row['fname']}' is: {creation_time}")
-        else:
-            self.__logger.debug(f"Could not determine the creation time of '{row['fname']}'.")
-        try:
-            if row is not None:
-                # Check if file creation time has changed (more reliable than modification time)
-                if 'creation_time' in row and row['creation_time'] is not None:
-                    current_creation_time = self.get_file_creation_time_timestamp(row['fname'])
-                    if row['creation_time'] != current_creation_time:
-                        self.__logger.debug('Cache miss: File %s creation time changed on disk', row['fname'])
-                        self.__insert_file(row['fname'], file_id, source='cache_miss')
-                        row = self.__db.execute(sql).fetchone()
-        except OSError:
-            self.__logger.warning("Image '%s' does not exist or is inaccessible", row['fname'])
-        except KeyError as e:
-            # Log missing database field
-            self.__logger.debug(f"Database field missing: {e}")
-        if row and row['latitude'] and row['longitude'] and row['location'] is None:
-            if self.__get_geo_location(row['latitude'], row['longitude']):
-                row = self.__db.execute(sql).fetchone()
-        try:
-            with self.__db:  # auto-commit
-                self.__db.execute(
-                    "UPDATE file SET displayed_count = displayed_count + 1, last_displayed = ? WHERE file_id = ?",
-                    (time.time(), file_id)
-                )
-        except Exception as e:
-            self.__logger.warning(f"Error updating file display count: {e}")
-        return row
 
     def get_column_names(self):
         sql = "PRAGMA table_info(all_data)"
@@ -658,12 +625,12 @@ class ImageCache:
         Log information about file time capabilities of the current system.
         """
         birth_supported = self.is_birth_time_supported()
-        self.__logger.info(f"File birth time support: {'Available' if birth_supported else 'Not available'}")
+        self.__logger.debug(f"File birth time support: {'Available' if birth_supported else 'Not available'}")
         
         if birth_supported:
-            self.__logger.info("System supports file creation time retrieval")
+            self.__logger.debug("System supports file creation time retrieval")
         else:
-            self.__logger.info("System does not support file creation time, will use modification time as fallback")
+            self.__logger.debug("System does not support file creation time, will use modification time as fallback")
 
 # If being executed (instead of imported), kick it off...
 if __name__ == "__main__":

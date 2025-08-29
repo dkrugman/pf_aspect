@@ -153,6 +153,11 @@ aspect:
   import_dir: "~/Pictures/Imports"        # location for imported photos before processing
   import_interval: 900                    # secsonds between checks for updates from cloud default: 900 (15 min)
   process_interval: 300                   # secsonds between checks for files to process defsult: 300 (5 min)
+  
+  # Import throttling configuration to prevent database overload
+  max_concurrent_downloads: 3             # maximum concurrent file downloads (default: 3)
+  max_concurrent_db_operations: 1         # maximum concurrent database operations (default: 1)
+  download_batch_size: 5                  # number of items to process in each batch (default: 5)
   min_rotation_interval: 30               # minimum time in seconds between rotations
   rotation_timeout: 30                    # max time before error
   target_set_size: 10                     # target number of images in each orientation  
