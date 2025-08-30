@@ -10,7 +10,6 @@ import pi3d  # type: ignore
 from PIL import Image, ImageFile, ImageFilter, ImageOps
 
 from . import get_image_meta, mat_image
-from .async_timer import init_timer
 from .video_streamer import VIDEO_EXTENSIONS, VideoFrameExtractor, VideoStreamer
 
 # supported display modes for display switch
@@ -206,7 +205,8 @@ class ViewerDisplay:
         if pic is not None and paused is not None:  # text needs to be refreshed
             self.__make_text(pic, paused)
         self.__name_tm = max(self.__name_tm, time.time() + self.__show_text_tm)
-        # self.__logger.debug(f"PIC: {pic} PAUSED: {paused} NAME_TM: {self.__name_tm} SHOW_TEXT_TM: {self.__show_text_tm}")
+        # self.__logger.debug(f"PIC: {pic} PAUSED: {paused} NAME_TM: {self.__name_tm} "
+        #                    f"SHOW_TEXT_TM: {self.__show_text_tm}")
 
     def set_brightness(self, val):
         self.__slide.unif[55] = val  # take immediate effect
@@ -220,7 +220,7 @@ class ViewerDisplay:
     def get_brightness(self):
         return round(
             self.__slide.unif[55], 2
-        )  # this will still give 32/64 bit differences sometimes, as will the float(format()) system # noqa: E501
+        )  # this will still give 32/64 bit differences sometimes, as will the float(format()) system
 
     def set_matting_images(self, val):  # needs to cope with "true", "ON", 0, "0.2" etc.
         try:
@@ -253,7 +253,7 @@ class ViewerDisplay:
         ext = os.path.splitext(pic.fname)[1].lower()
         if pic.is_portrait and not (
             ext in (".heif", ".heic")
-        ):  # heif and heic images are converted to PIL.Image obects and are alway in correct orienation # noqa: E501
+        ):  # heif and heic images are converted to PIL.Image objects and are always in correct orientation
             # self.__logger.debug(f"TURN TURN TURN TURN TURN TURN TURN TURN TURN TURN TURN TURN {pic.fname}")
             try:
                 im = ImageOps.exif_transpose(im).rotate(90, resample=False, expand=True)
@@ -284,7 +284,8 @@ class ViewerDisplay:
             diff_aspect = 1 - (image_aspect / screen_aspect)
         else:
             diff_aspect = 1 - (screen_aspect / image_aspect)
-        # self.__logger.debug(f"screen_aspect: {screen_aspect}, image_aspect: {image_aspect}, diff_aspect: {diff_aspect}")
+        # self.__logger.debug(f"screen_aspect: {screen_aspect}, image_aspect: {image_aspect}, "
+        #                    f"diff_aspect: {diff_aspect}")
         return (screen_aspect, image_aspect, diff_aspect)
 
     def __tex_load(self, pic, size=None):  # noqa: C901
@@ -721,7 +722,7 @@ class ViewerDisplay:
                         self.__video_path = None
 
             loop_running = self.__display.loop_running()
-            skip_image = False  # can add possible reasons to skip image below here
+            # can add possible reasons to skip image below here
             self.__slide.draw()
             self.__draw_overlay()
             if self.clock_is_on:
