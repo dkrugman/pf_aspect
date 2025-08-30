@@ -10,7 +10,6 @@ import os
 import signal
 import ssl
 import sys
-import time
 from datetime import datetime
 
 from . import import_photos, process_images
@@ -208,14 +207,16 @@ class Controller:
                     if "picframe process" in str(e):
                         if self.__http_config.get("auto_restart_on_conflict", True):
                             self.__logger.warning(
-                                "Detected another picframe process running. Automatically restarting to resolve the conflict..."
+                                "Detected another picframe process running. "
+                                "Automatically restarting to resolve the conflict..."
                             )
                             self.__interface_http = None
                             # Schedule automatic restart
                             asyncio.create_task(self._auto_restart())
                         else:
                             self.__logger.error(
-                                "Port conflict detected but auto-restart is disabled. Continuing without HTTP interface."
+                                "Port conflict detected but auto-restart is disabled. "
+                                "Continuing without HTTP interface."
                             )
                             self.__interface_http = None
                     else:
@@ -294,7 +295,6 @@ class Controller:
     async def _auto_restart(self):
         """Automatically restart picframe to resolve port conflicts."""
         import os
-        import subprocess
         import sys
 
         self.__logger.info("Initiating automatic picframe restart...")

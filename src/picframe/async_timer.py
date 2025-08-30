@@ -18,7 +18,8 @@ import asyncio
 import logging
 import sqlite3
 import time
-from datetime import datetime, timedelta, timezone
+
+# from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
@@ -45,7 +46,7 @@ class AsyncTimerManager:
         self.__db.execute("PRAGMA temp_store=MEMORY")
         self.__db.execute("PRAGMA mmap_size=30000000000")
         self.__db.execute("PRAGMA cache_size=10000")
-        self.__logger.debug(f"DB connection established")
+        self.__logger.debug("DB connection established")
         with self.__db:
             self.__db.execute(
                 """
@@ -81,13 +82,13 @@ class AsyncTimerManager:
                 for task in self._tasks:
                     due = now - task["last_run"] >= task["interval"]
                     if due:
-                        # self.__logger.debug(f"Task '{task['name']}' is due (interval: {task['interval']}s, last_run: {task['last_run']}, now: {now})")
+                        # self.__logger.debug(f"Task '{task['name']}' is due (interval: {task['interval']}s, "
+                        #                    f"last_run: {task['last_run']}, now: {now})")
                         task["last_run"] = now
                         self._save_last_run(task["name"], now)
                         coros.append(self._run_task(task))
                     else:
-                        time_until = task["interval"] - (now - task["last_run"])
-                        # self.__logger.debug(f"Task '{task['name']}' not due yet (time_until: {time_until:.1f}s)")
+                        pass  # Task not due yet
 
                 if coros:
                     self.__logger.debug(f"Executing {len(coros)} timer tasks")

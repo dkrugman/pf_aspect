@@ -6,23 +6,18 @@ Integrates with configured import sources (e.g. Nixplay) and maintains imported_
 """
 
 import asyncio
-import json
 import logging
 import os
-import re
+
+# import re
 import sqlite3
-import sys
 import time
 import warnings
-from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlencode, urlparse
 
 import aiofiles
 import aiohttp
-import ntplib
-import pytz
 import urllib3
 
 from .process_images import ProcessImages
@@ -100,7 +95,7 @@ class ImportPhotos:
         create_schema(self.__db)
 
         # Thread pool for CPU-bound operations
-        self._thread_pool = ThreadPoolExecutor(max_workers=4)
+        # self._thread_pool = ThreadPoolExecutor(max_workers=4)
 
     async def check_for_updates(self) -> None:
         """Main async method to check for updates and import photos."""

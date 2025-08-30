@@ -144,7 +144,7 @@ def find_available_port(start_port: int, max_attempts: int = 10) -> int:
 class RequestHandler(BaseHTTPRequestHandler):
     def do_AUTHHEAD(self):
         if self.server._auth is not None:
-            if self.headers.get("Authorization") == None:
+            if self.headers.get("Authorization") is None:
                 self.send_response(401)
                 self.send_header("WWW-Authenticate", 'Basic realm="Restricted"')
                 self.send_header("Content-type", "text/html")
@@ -328,15 +328,16 @@ class InterfaceHttp(HTTPServer):
                 error_msg = (
                     f"Port {port} is already in use by another picframe process (PIDs: {', '.join(other_pids)})."
                 )
-                error_msg += f"\nThis Raspberry Pi is dedicated to picframe, so only one instance should be running."
+                error_msg += "\nThis Raspberry Pi is dedicated to picframe, so only one instance should be running."
                 logger = logging.getLogger(__name__)
                 logger.error(error_msg)
                 raise OSError(
-                    f"[Errno 98] Address already in use: Port {port} is occupied by another picframe process. PIDs: {', '.join(other_pids)}"
+                    f"[Errno 98] Address already in use: Port {port} is occupied by another picframe process. "
+                    f"PIDs: {', '.join(other_pids)}"
                 )
             else:
                 error_msg = f"Port {port} is already in use by an unknown process."
-                error_msg += f"\nSince this is a dedicated picframe device, this suggests a system issue."
+                error_msg += "\nSince this is a dedicated picframe device, this suggests a system issue."
                 logger = logging.getLogger(__name__)
                 logger.error(error_msg)
                 raise OSError(f"[Errno 98] Address already in use: Port {port} is occupied by an unknown process")
