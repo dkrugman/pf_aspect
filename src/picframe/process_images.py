@@ -2,7 +2,6 @@ import asyncio
 import logging
 import os
 import sqlite3
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import exifread
@@ -223,8 +222,8 @@ class ProcessImages:
 
     def parse_filename(self, filename):
         """Parse filename to extract source and playlist using shared utility."""
-        # This is a bit of a hack, but the idea behind the import folder and processing is that any image can be dropped into the import folder
-        # and it will get processed.
+        # This is a bit of a hack, but the idea behind the import folder and processing
+        # is that any image can be dropped into the import folder and it will get processed.
         configured_sources = self.model.get_aspect_config().get("sources", {})
         return parse_filename_metadata(filename, configured_sources)
 

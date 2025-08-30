@@ -1,7 +1,6 @@
 import logging
 import os
 import sqlite3
-import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -10,9 +9,7 @@ from . import schema
 from .config import DB_JRNL_MODE
 from .file_time_utils import get_file_birth_time, get_file_times, is_birth_time_available
 from .file_utils import parse_filename_metadata
-from .get_image_meta import GetImageMeta
 from .image_meta_utils import get_exif_info
-from .video_meta_utils import get_video_metadata
 from .video_streamer import VIDEO_EXTENSIONS
 
 
@@ -174,7 +171,8 @@ class ImageCache:
         return None
 
     def set_played_for_image(self, file_id):
-        """Set played = 1 for the given file_id. Also increment displayed_count and set last_displayed to current time."""
+        """Set played = 1 for the given file_id. Also increment displayed_count and
+        set last_displayed to current time."""
         try:
             with self.__db:  # auto-commit
                 self.__db.execute("UPDATE slideshow SET played = 1 WHERE file_id = ?", (file_id,))
@@ -189,7 +187,7 @@ class ImageCache:
     def create_new_slideshow(self):
         """Create a new slideshow using the NewSlideshow class."""
         # Prevent re-entrancy if called concurrently (e.g., by a timer)
-        self.__logger.debug("CREATE_NEW_SLIDESHOW called ********************************")
+        self.__logger.debug("CREATE_NEW_SLIDESHOW called **************************")
         if getattr(self, "_creating_new_slideshow", False):
             self.__logger.debug("CREATING NEW SLIDESHOW ATTR NOT FOUND")
         elif self._creating_new_slideshow:
@@ -407,7 +405,16 @@ class ImageCache:
                             meta_inserts.append((file, meta))
 
                         file_inserts.append(
-                            (dir, parsed_source or source, parsed_playlist, base, extension, width, height, creation_tm)
+                            (
+                                dir,
+                                parsed_source or source,
+                                parsed_playlist,
+                                base,
+                                extension,
+                                width,
+                                height,
+                                creation_tm,
+                            )
                         )
 
                     except Exception as e:
@@ -420,7 +427,8 @@ class ImageCache:
 
                 # Execute batch file inserts
                 file_insert_sql = """
-                    INSERT OR IGNORE INTO file(folder_id, source, playlist, basename, extension, width, height, creation_time)
+                    INSERT OR IGNORE INTO file(folder_id, source, playlist, basename,
+                    extension, width, height, creation_time)
                     VALUES((SELECT folder_id from folder where name = ?), ?, ?, ?, ?, ?, ?, ?)
                 """
                 cursor.executemany(file_insert_sql, file_inserts)
@@ -465,7 +473,8 @@ class ImageCache:
 
         # Use INSERT OR REPLACE with all unique constraint fields to avoid duplicates
         file_insert = """
-            INSERT OR IGNORE INTO file(folder_id, source, playlist, basename, extension, width, height, creation_time)
+            INSERT OR IGNORE INTO file(folder_id, source, playlist, basename,
+            extension, width, height, creation_time)
             VALUES((SELECT folder_id from folder where name = ?), ?, ?, ?, ?, ?, ?, ?)
         """
         # Insert the new folder if it's not already in the table.
@@ -481,7 +490,6 @@ class ImageCache:
         vals = list(meta.values())
         vals.insert(0, file)
 
-        mod_tm = os.path.getmtime(file)
         dir, file_only = os.path.split(file)
         base, extension = os.path.splitext(file_only)
         extension = extension.lower().lstrip(".")
@@ -501,7 +509,8 @@ class ImageCache:
                     creation_tm = self.get_file_creation_time_timestamp(file)
                     # Execute with all required parameters
                     self.__logger.debug(
-                        f"Inserting file from {source}, playlist={playlist}: {base}.{extension} in {dir} with creation_time={creation_tm}"
+                        f"Inserting file from {source}, playlist={playlist}: "
+                        f"{base}.{extension} in {dir} with creation_time={creation_tm}"
                     )
                     cursor.execute(file_insert, (dir, source, playlist, base, extension, width, height, creation_tm))
 
@@ -531,9 +540,9 @@ class ImageCache:
     def __get_meta_sql_from_dict(self, dict):
         columns = ", ".join(dict.keys())
         ques = ", ".join("?" * len(dict.keys()))
-        return "INSERT OR REPLACE INTO meta(file_id, {0}) VALUES((SELECT file_id from all_data where fname = ?), {1})".format(
-            columns, ques
-        )  # noqa: E501
+        return (
+            "INSERT OR REPLACE INTO meta(file_id, {0}) " "VALUES((SELECT file_id from all_data where fname = ?), {1})"
+        ).format(columns, ques)
 
     def __purge_missing_files_and_folders(self):
         # Find folders in the db that are no longer on disk
