@@ -41,7 +41,8 @@ def parse_filename_metadata(filename, configured_sources=None):
         # Validate that source is in the configured sources if provided
         if configured_sources and source not in configured_sources:
             logger.warning(
-                f"Source '{source}' not found in configured sources. Available sources: {list(configured_sources.keys())}"
+                f"Source '{source}' not found in configured sources. "
+                f"Available sources: {list(configured_sources.keys())}"
             )
             source = "unknown"
 

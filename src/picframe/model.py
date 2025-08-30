@@ -105,7 +105,8 @@ DEFAULT_CONFIG = {
         "use_http": False,
         "path": "~/picframe_data/html",
         "port": 9000,
-        "auto_restart_on_conflict": True,  # Automatically restart picframe when port conflicts with other picframe processes
+        # Automatically restart picframe when port conflicts with other picframe processes
+        "auto_restart_on_conflict": True,
         "use_ssl": False,
         "keyfile": "/path/to/key.pem",
         "certfile": "/path/to/fullchain.pem",
@@ -518,9 +519,9 @@ class Model:
             self.__logger.warning("No files available, setting file index to 0")
 
     def get_next_file(self):  # MAIN LOOP: keep getting next file
-        missing_images = 0
         pic = None  # Initialize pic to avoid UnboundLocalError
-        # self.__logger.debug("get_next_file called, number of files:  %s. File Index: %s", self.__number_of_files, self.__file_index)
+        # self.__logger.debug("get_next_file called, number of files:  %s. File Index: %s",
+        #                    self.__number_of_files, self.__file_index)
         # Check for active slideshow
         # self.__logger.debug("is_active_slideshow: %s", self.__image_cache._is_active_slideshow())
         if self.__image_cache._is_active_slideshow():

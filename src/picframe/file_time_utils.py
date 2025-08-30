@@ -8,12 +8,10 @@ for systems where Python's os.stat() doesn't support st_birthtime.
 
 import logging
 import os
-import stat
 import subprocess
-import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Tuple, Union
+from typing import Optional, Union
 
 logger = logging.getLogger(__name__)
 

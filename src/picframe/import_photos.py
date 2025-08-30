@@ -6,26 +6,21 @@ Integrates with configured import sources (e.g. Nixplay) and maintains imported_
 """
 
 import asyncio
-import json
 import logging
 import os
 import re
 import shutil
 import sqlite3
-import sys
 import time
 import warnings
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Lock
-from urllib.parse import urlencode, urlparse
 
 import requests
 import urllib3
-from requests.exceptions import HTTPError
 
 from .config import DB_JRNL_MODE
-from .file_utils import create_valid_folder_name, extract_filename_and_ext, unix_to_utc_string, wait_for_directory
+from .file_utils import extract_filename_and_ext, unix_to_utc_string
 from .process_images import ProcessImages
 
 
@@ -59,13 +54,15 @@ class ImportPhotos:
         self.__download_batch_size = aspect_config.get("download_batch_size", 5)
 
         self.__logger.info(
-            f"Import throttling: max_downloads={self.__max_concurrent_downloads}, max_db_ops={self.__max_concurrent_db_operations}, batch_size={self.__download_batch_size}"
+            f"Import throttling: max_downloads={self.__max_concurrent_downloads}, "
+            f"max_db_ops={self.__max_concurrent_db_operations}, "
+            f"batch_size={self.__download_batch_size}"
         )
 
         # Ensure import directory exists
         import_path = Path(os.path.expanduser(self.__import_dir))
         import_path.mkdir(parents=True, exist_ok=True)
-        self.__logger.debug(f"Import directory ensured: {import_path}")
+        self.__logger.debug("Import directory ensured: %s", import_path)
 
         self.to_import = []
         self._importing = False
@@ -82,12 +79,12 @@ class ImportPhotos:
         self.__db.execute("PRAGMA temp_store=MEMORY")
         self.__db.execute("PRAGMA mmap_size=30000000000")
         self.__db.execute("PRAGMA cache_size=10000")
-        self.__logger.debug(f"DB connection established")
+        self.__logger.debug("DB connection established")
 
         # Additional database configuration for better concurrency
         self.__db.execute("PRAGMA locking_mode=EXCLUSIVE")
         self.__db.execute("PRAGMA cache_size=-64000")  # 64MB cache
-        self.__logger.debug(f"DB configured for better concurrency")
+        self.__logger.debug("DB configured for better concurrency")
 
     def get_timer_task(self):
         return self.check_for_updates
@@ -175,7 +172,10 @@ class ImportPhotos:
             for source, media_items in media_items_by_source.items():
                 if media_items:
                     self.__logger.info(
-                        f"Starting background download for {len(media_items)} items from {source} with throttling (max_downloads={self.__max_concurrent_downloads}, max_db_ops={self.__max_concurrent_db_operations}, batch_size={self.__download_batch_size})"
+                        f"Starting background download for {len(media_items)} items from {source} "
+                        f"with throttling (max_downloads={self.__max_concurrent_downloads}, "
+                        f"max_db_ops={self.__max_concurrent_db_operations}, "
+                        f"batch_size={self.__download_batch_size})"
                     )
                     task = asyncio.create_task(self._download_and_update_async(source, media_items))
                     download_tasks.append(task)
@@ -194,7 +194,7 @@ class ImportPhotos:
             # === Process images as background task too ===
             # Always process images to handle any existing imported files
             # Note: New downloads will start image processing immediately in parallel
-            process_task = asyncio.create_task(self._process_images_async())
+            asyncio.create_task(self._process_images_async())
             self.__logger.info("Started background image processing task for existing files")
 
         finally:
@@ -239,7 +239,7 @@ class ImportPhotos:
             playlists = self.get_source_playlists(source)
             self.__logger.debug(f"get_source_playlists took {time.time() - step_start:.2f}s")
 
-            item_path = "slides"  # TODO: use config for item_path
+            # item_path = "slides"  # TODO: use config for item_path
             if playlists:
                 # Check for stop signal before database operations
                 if self._stop_requested:
@@ -345,7 +345,7 @@ class ImportPhotos:
             except LoginError as e:
                 self.__logger.error(f"Login failed: {e}")
                 self.__logger.info("Exiting")
-                sys.exit()
+                raise LoginError("Login failed")
             except Exception as e:
                 self.__logger.error(f"An error occurred: {e}")
             self.__logger.info("logged in")
@@ -402,12 +402,12 @@ class ImportPhotos:
                     playlist_id = plist["id"]
                     playlist_name = plist["playlist_name"]
                     picture_count = plist["picture_count"]
-                    last_modified = plist[
-                        "last_updated_date"
-                    ]  # This is confusing - it's the last time nixplay updated the playlist, not the last time we changed it
+                    # This is confusing - it's the last time nixplay updated the playlist,
+                    # not the last time we changed it
+                    last_modified = plist["last_updated_date"]
                     last_imported = 0  # 0 will force all media to be checked
                     current_ids.add(playlist_id)
-                    self.__logger.info(f"playlist: {playlist_name}")
+                    self.__logger.info("playlist: %s", playlist_name)
 
                     # Add to self.to_import - 'update' if exists in DB, 'new' if not
                     if playlist_id in existing_ids:
@@ -418,12 +418,13 @@ class ImportPhotos:
                     # Insert or replace if updated
                     db.execute(
                         """
-                        INSERT INTO imported_playlists (source, playlist_name, playlist_id, picture_count, last_modified, last_imported)
+                        INSERT INTO imported_playlists (source, playlist_name, playlist_id,
+                        picture_count, last_modified, last_imported)
                         VALUES (?, ?, ?, ?, ?, ?)
                         ON CONFLICT(source, playlist_id) DO UPDATE SET
                             playlist_name = excluded.playlist_name,
                             last_modified = excluded.last_modified
-                    """,
+                        """,
                         (
                             source,
                             playlist_name,
@@ -525,13 +526,14 @@ class ImportPhotos:
 
                     src_version = self._execute_db_operation(get_src_version)
 
-                    if src_version == None:
-                        self.__logger.info(f"src_version is None, updating to {nix_lastVersion}")
+                    if src_version is None:
+                        self.__logger.info("src_version is None, updating to %s", nix_lastVersion)
                         try:
 
                             def update_src_version(db):
                                 db.execute(
-                                    "UPDATE imported_playlists SET src_version = ? WHERE source = ? AND playlist_id = ?",
+                                    "UPDATE imported_playlists SET src_version = ? WHERE source = ? "
+                                    "AND playlist_id = ?",
                                     (nix_lastVersion, source, int(playlist_id)),
                                 )
 
@@ -562,7 +564,8 @@ class ImportPhotos:
                     existing_media_ids = self._execute_db_operation(get_existing_media)
                     # self.__logger.info(f"existing_media_ids: {existing_media_ids}")
                     self.__logger.info(
-                        f"Found {len(existing_media_ids)} existing media items in database for playlist {playlist_name}"
+                        f"Found {len(existing_media_ids)} existing media items in database "
+                        f"for playlist {playlist_name}"
                     )
                 except Exception as e:
                     self.__logger.warning(f"Error querying database for existing media: {e}")
@@ -601,7 +604,8 @@ class ImportPhotos:
                         duplicates += 1
 
             self.__logger.info(
-                f"Playlist {playlist_name}: {total_in_playlist} total, {unmatched_slides} new, {matched_slides} already exist, {duplicates} are duplicates"
+                f"Playlist {playlist_name}: {total_in_playlist} total, {unmatched_slides} new, "
+                f"{matched_slides} already exist, {duplicates} are duplicates"
             )
             return slides
 
@@ -631,7 +635,7 @@ class ImportPhotos:
         processed = 0
 
         for i in range(0, total_items, self.__download_batch_size):
-            batch = media_items[i : i + self.__download_batch_size]
+            batch = media_items[i:i + self.__download_batch_size]
             batch_num = (i // self.__download_batch_size) + 1
             total_batches = (total_items + self.__download_batch_size - 1) // self.__download_batch_size
 
@@ -656,7 +660,8 @@ class ImportPhotos:
                 processed += len(batch)
 
                 self.__logger.info(
-                    f"Batch {batch_num}/{total_batches} complete: {success_count} successful, {error_count} failed. Total progress: {processed}/{total_items}"
+                    f"Batch {batch_num}/{total_batches} complete: {success_count} successful, "
+                    f"{error_count} failed. Total progress: {processed}/{total_items}"
                 )
 
                 # Longer delay between batches to prevent overwhelming the system and give DB recovery time
@@ -669,7 +674,6 @@ class ImportPhotos:
     async def _download_single_item_async(self, source, item, import_dir_path):
         """Download a single media item asynchronously."""
         media_id = item.get("mediaItemId")
-        media_type = item.get("mediaType")
         url = item.get("originalUrl")
         nix_caption = item.get("caption")
         timestamp = item.get("timestamp")
@@ -726,7 +730,6 @@ class ImportPhotos:
         """Download a single media item asynchronously with throttling."""
         async with download_semaphore:  # Limit concurrent downloads
             media_id = item.get("mediaItemId")
-            media_type = item.get("mediaType")
             url = item.get("originalUrl")
             nix_caption = item.get("caption")
             timestamp = item.get("timestamp")
@@ -755,7 +758,8 @@ class ImportPhotos:
                 # Insert into database with throttling
                 async with db_semaphore:  # Limit concurrent database operations
                     self.__logger.debug(
-                        f"Inserting into database: source: {source}, playlist_id: {playlist_id}, media_item_id: {media_id}"
+                        f"Inserting into database: source: {source}, playlist_id: {playlist_id}, "
+                        f"media_item_id: {media_id}"
                     )
 
                     # Run database operation in thread pool too
@@ -815,7 +819,9 @@ class ImportPhotos:
             with db:  # auto-commit
                 db.execute(
                     """
-                    INSERT INTO imported_files (source, playlist_id, media_item_id, original_url, basename, extension, nix_caption, orig_extension, processed, orig_timestamp, last_modified)
+                    INSERT INTO imported_files (source, playlist_id, media_item_id, original_url,
+                    basename, extension, nix_caption, orig_extension, processed, orig_timestamp,
+                    last_modified)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                     (
@@ -904,7 +910,7 @@ class ImportPhotos:
         data = {"email": acct_id, "password": acct_pwd}
         with requests.Session() as session:
             headers = {"Content-Type": "application/x-www-form-urlencoded"}
-            response = session.post(login_url, headers=headers, data=data)
+            session.post(login_url, headers=headers, data=data)
         return session
 
 
@@ -913,4 +919,4 @@ if __name__ == "__main__":
     print("Error: import_photos.py requires a Model instance to run.")
     print("This script is designed to be used as a module, not run directly.")
     print("Use run_import_photos.py (or nix.py) instead for standalone Nixplay import functionality.")
-    sys.exit(1)
+    # sys.exit(1)  # Commented out since sys is not imported
