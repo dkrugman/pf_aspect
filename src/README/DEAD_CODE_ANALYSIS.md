@@ -183,9 +183,9 @@ def find_unused_methods(file_path):
 
 ## 📝 **Summary**
 
-**Total Dead Code Identified**: ~100-150 lines  
-**Immediate Action Items**: 3-5 items  
-**Risk Level**: Low to Medium  
-**Effort Required**: 2-4 hours  
+**Total Dead Code Identified**: ~100-150 lines
+**Immediate Action Items**: 3-5 items
+**Risk Level**: Low to Medium
+**Effort Required**: 2-4 hours
 
 The codebase is relatively clean with minimal dead code. Focus on removing the clearly unused `get_file_info()` method and organizing test files for the best impact-to-effort ratio.

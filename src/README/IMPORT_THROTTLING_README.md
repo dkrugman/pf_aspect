@@ -26,7 +26,7 @@ Add these settings to your `configuration.yaml` file under the `aspect:` section
 ```yaml
 aspect:
   # ... existing settings ...
-  
+
   # Import throttling configuration to prevent database overload
   max_concurrent_downloads: 5             # maximum concurrent file downloads (default: 5)
   max_concurrent_db_operations: 3         # maximum concurrent database operations (default: 3)

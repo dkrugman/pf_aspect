@@ -6,6 +6,7 @@ Defines the database schema for picframe and provides schema creation utilities.
 
 REQUIRED_SCHEMA_VERSION = 3
 
+
 def create_schema(db):
     """Creates or upgrades the database schema to REQUIRED_SCHEMA_VERSION."""
     # Slideshow table is here because it is part of the schema, but always gets dropped and recreated
@@ -42,7 +43,7 @@ def create_schema(db):
             playlist_id    TEXT NOT NULL,
             media_item_id  TEXT,
             original_url   TEXT,
-            basename       TEXT NOT NULL,     
+            basename       TEXT NOT NULL,
             extension      TEXT NOT NULL,
             nix_caption    TEXT,
             width          INTEGER,
@@ -168,7 +169,7 @@ def create_schema(db):
         sql_clean_file_trigger,
         sql_clean_meta_trigger,
         "DELETE FROM db_info",
-        f"INSERT INTO db_info VALUES({REQUIRED_SCHEMA_VERSION})"
+        f"INSERT INTO db_info VALUES({REQUIRED_SCHEMA_VERSION})",
     ]
 
     cur = db.cursor()

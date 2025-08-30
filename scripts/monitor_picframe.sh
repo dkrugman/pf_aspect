@@ -57,41 +57,41 @@ get_picframe_info() {
 restart_picframe() {
     local current_time=$(date +%s)
     local time_since_last=$((current_time - last_restart_time))
-    
+
     # Check cooldown period
     if [ $time_since_last -lt $RESTART_COOLDOWN ]; then
         local remaining=$((RESTART_COOLDOWN - time_since_last))
         log_message "${YELLOW}Restart cooldown active. Waiting ${remaining}s before next restart.${NC}"
         return 1
     fi
-    
+
     # Check max restart limit
     if [ $restart_count -ge $MAX_RESTARTS ]; then
         log_message "${RED}Maximum restart attempts reached (${MAX_RESTARTS}). Manual intervention required.${NC}"
         return 1
     fi
-    
+
     log_message "${YELLOW}Attempting to restart picframe... (attempt $((restart_count + 1))/${MAX_RESTARTS})${NC}"
-    
+
     # Kill existing processes
     pkill -f "python3.*picframe" 2>/dev/null || true
     pkill -f "tclsh.*unbuffer.*picframe" 2>/dev/null || true
-    
+
     # Wait a moment
     sleep 2
-    
+
     # Start picframe
     cd "$HOME/src/picframe" || {
         log_message "${RED}Failed to change to picframe directory${NC}"
         return 1
     }
-    
+
     # Start in background
     nohup python3 src/picframe/scripts/picframe > "$HOME/picframe_restart.log" 2>&1 &
-    
+
     # Wait to see if it starts successfully
     sleep 5
-    
+
     if check_picframe; then
         log_message "${GREEN}Picframe restarted successfully${NC}"
         restart_count=$((restart_count + 1))
@@ -213,7 +213,7 @@ while [ "$monitoring" = true ]; do
     else
         # Picframe is not running
         log_message "${RED}Picframe is not running!${NC}"
-        
+
         if [ "$AUTO_RESTART" = true ]; then
             if restart_picframe; then
                 log_message "${GREEN}Auto-restart successful${NC}"
@@ -224,11 +224,9 @@ while [ "$monitoring" = true ]; do
             log_message "${YELLOW}Auto-restart disabled. Manual intervention required.${NC}"
         fi
     fi
-    
+
     # Wait before next check
     sleep "$CHECK_INTERVAL"
 done
 
 log_message "${BLUE}Picframe monitor stopped${NC}"
-
-

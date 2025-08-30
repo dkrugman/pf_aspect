@@ -36,9 +36,9 @@ capture_command() {
     local description="$1"
     local command="$2"
     local output_file="$3"
-    
+
     log_message "${YELLOW}Capturing: $description${NC}"
-    
+
     if eval "$command" > "$output_file" 2>&1; then
         log_message "${GREEN}✓ Captured: $description${NC}"
     else
@@ -177,14 +177,14 @@ log_message "${BLUE}All collected data: $INVESTIGATION_DIR/${NC}"
 # 10. Optional: Analyze crash dumps if found
 if [ -s "$SYSTEM_INFO_DIR/crash_dumps_found.txt" ]; then
     log_message "${YELLOW}Crash dumps found! Analyzing...${NC}"
-    
+
     while IFS= read -r dump_file; do
         if [ -f "$dump_file" ]; then
             log_message "${BLUE}Analyzing crash dump: $dump_file${NC}"
-            
+
             # Copy crash dump to investigation directory
             cp "$dump_file" "$CRASH_DUMPS_DIR/"
-            
+
             # Try to analyze JSON crash dumps
             if [[ "$dump_file" == *.json ]]; then
                 if command -v jq >/dev/null 2>&1; then
@@ -209,5 +209,3 @@ echo "2. Look for patterns in the crash logs"
 echo "3. Check system resource usage at crash time"
 echo "4. Consider implementing the crash investigator module"
 echo "5. Monitor system resources during normal operation"
-
-

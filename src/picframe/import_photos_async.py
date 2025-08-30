@@ -6,8 +6,6 @@ Integrates with configured import sources (e.g. Nixplay) and maintains imported_
 """
 
 import asyncio
-import aiohttp
-import aiofiles
 import json
 import logging
 import os
@@ -16,17 +14,19 @@ import sqlite3
 import sys
 import time
 import warnings
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlencode, urlparse
-from concurrent.futures import ThreadPoolExecutor
 
+import aiofiles
+import aiohttp
 import ntplib
 import pytz
 import urllib3
 
-from .schema import create_schema
 from .process_images import ProcessImages
+from .schema import create_schema
 
 
 def extract_filename_and_ext(url_or_path):
@@ -40,45 +40,51 @@ def extract_filename_and_ext(url_or_path):
     """
     if not url_or_path:
         return None, None
-    
+
     # Remove query parameters if URL
-    filename = url_or_path.split('/')[-1].split('?')[0]
+    filename = url_or_path.split("/")[-1].split("?")[0]
     base, ext = os.path.splitext(filename)
-    ext = ext.lstrip('.').lower()
+    ext = ext.lstrip(".").lower()
     return base, ext
+
 
 def unix_to_utc_string(timestamp):
     """Convert Unix timestamp to UTC string."""
     try:
         dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
-        return dt.strftime('%Y-%m-%d %H:%M:%S')
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
     except (ValueError, OSError):
-        return datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+        return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
 class LoginError(Exception):
     pass
 
+
 class GetPlaylistsError(Exception):
     pass
+
 
 class FolderCreationError(Exception):
     pass
 
+
 class GetMediaError(Exception):
     pass
 
+
 class ImportPhotos:
     """Class to import photos from third-party services to local filesystem."""
+
     def __init__(self, model):
         warnings.filterwarnings("ignore", category=urllib3.exceptions.InsecureRequestWarning)
         self.__logger = logging.getLogger(__name__)
         self.__model = model
         self.__sources = self.__model.get_aspect_config()["sources"]
         if not self.__sources:
-            raise Exception("No import sources configured! Aborting creation of ImportPhotos instance.")   
+            raise Exception("No import sources configured! Aborting creation of ImportPhotos instance.")
         model_config = self.__model.get_model_config()
-        self.__db_file = os.path.expanduser(model_config['db_file'])
+        self.__db_file = os.path.expanduser(model_config["db_file"])
         self.__import_dir = self.__model.get_aspect_config()["import_dir"]
         self._importing = False
         self.__db = sqlite3.connect(self.__db_file, check_same_thread=False, timeout=30.0)
@@ -92,7 +98,7 @@ class ImportPhotos:
         self.__db.execute("PRAGMA mmap_size=30000000000")
         self.__db.execute("PRAGMA cache_size=10000")
         create_schema(self.__db)
-        
+
         # Thread pool for CPU-bound operations
         self._thread_pool = ThreadPoolExecutor(max_workers=4)
 
@@ -101,27 +107,27 @@ class ImportPhotos:
         if self._importing:
             self.__logger.debug("Import already in progress, skipping.")
             return
-            
+
         self._importing = True
         try:
             self.__logger.info("Starting async photo import process...")
-            
+
             # Process each source
             for source_config in self.__sources:
-                source_name = source_config.get('name', 'unknown')
+                source_name = source_config.get("name", "unknown")
                 self.__logger.info(f"Processing source: {source_name}")
-                
+
                 try:
                     await self._process_source_async(source_config)
                 except Exception as e:
                     self.__logger.error(f"Error processing source {source_name}: {e}")
                     continue
-            
+
             # Process images after importing
             self.__logger.info("Starting image processing...")
             processor = ProcessImages(self.__model)
             await processor.process_images()
-            
+
         except Exception as e:
             self.__logger.error(f"Error during import: {e}")
         finally:
@@ -130,26 +136,26 @@ class ImportPhotos:
 
     async def _process_source_async(self, source_config):
         """Process a single import source asynchronously."""
-        source_name = source_config.get('name')
-        
+        source_name = source_config.get("name")
+
         # Get playlists (this might involve API calls)
         playlists = await self._get_playlists_async(source_config)
-        
+
         # Update database with playlist info
         await self._update_playlists_db_async(source_name, playlists)
-        
+
         # Process each playlist
         for playlist in playlists:
-            playlist_id = playlist.get('id')
+            playlist_id = playlist.get("id")
             self.__logger.info(f"Processing playlist: {playlist_id}")
-            
+
             try:
                 # Get media items for this playlist
                 media_items = await self._get_media_items_async(source_config, playlist_id)
-                
+
                 # Download and save media items
                 await self._save_media_async(source_name, playlist_id, media_items)
-                
+
             except Exception as e:
                 self.__logger.error(f"Error processing playlist {playlist_id}: {e}")
                 continue
@@ -169,28 +175,21 @@ class ImportPhotos:
     async def _update_playlists_db_async(self, source, playlists):
         """Update playlist database asynchronously."""
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(
-            self._thread_pool, 
-            self._update_playlists_db_blocking, 
-            source, 
-            playlists
-        )
+        await loop.run_in_executor(self._thread_pool, self._update_playlists_db_blocking, source, playlists)
 
     def _update_playlists_db_blocking(self, source, playlists):
         """Blocking database update for playlists."""
         try:
             with self.__db:
                 for playlist in playlists:
-                    self.__db.execute("""
-                        INSERT OR REPLACE INTO imported_playlists 
-                        (source, playlist_id, name, last_updated) 
+                    self.__db.execute(
+                        """
+                        INSERT OR REPLACE INTO imported_playlists
+                        (source, playlist_id, name, last_updated)
                         VALUES (?, ?, ?, ?)
-                    """, (
-                        source,
-                        playlist.get('id'),
-                        playlist.get('name'),
-                        unix_to_utc_string(time.time())
-                    ))
+                    """,
+                        (source, playlist.get("id"), playlist.get("name"), unix_to_utc_string(time.time())),
+                    )
         except Exception as e:
             self.__logger.error(f"Error updating playlists database: {e}")
 
@@ -198,24 +197,24 @@ class ImportPhotos:
         """Download and save media items asynchronously."""
         if not media_items:
             return
-            
+
         self.__logger.info(f"Downloading {len(media_items)} media items for playlist {playlist_id}")
-        
+
         import_dir_path = Path(os.path.expanduser(self.__import_dir))
         import_dir_path.mkdir(parents=True, exist_ok=True)
-        
+
         # Create semaphore to limit concurrent downloads
         semaphore = asyncio.Semaphore(5)  # Max 5 concurrent downloads
-        
+
         # Create tasks for all downloads
         tasks = []
         for item in media_items:
             task = self._download_item_async(semaphore, source, playlist_id, item, import_dir_path)
             tasks.append(task)
-        
+
         # Execute downloads concurrently
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        
+
         # Log results
         success_count = sum(1 for r in results if r is True)
         error_count = len(results) - success_count
@@ -255,8 +254,15 @@ class ImportPhotos:
                 await loop.run_in_executor(
                     self._thread_pool,
                     self._insert_media_db_blocking,
-                    source, playlist_id, media_id, url, basename, extension,
-                    nix_caption, timestamp, str(local_path)
+                    source,
+                    playlist_id,
+                    media_id,
+                    url,
+                    basename,
+                    extension,
+                    nix_caption,
+                    timestamp,
+                    str(local_path),
                 )
 
                 self.__logger.info(f"Successfully imported: {full_name}")
@@ -273,35 +279,48 @@ class ImportPhotos:
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.get(url) as response:
                     response.raise_for_status()
-                    
+
                     # Write file asynchronously
-                    async with aiofiles.open(local_path, 'wb') as f:
+                    async with aiofiles.open(local_path, "wb") as f:
                         async for chunk in response.content.iter_chunked(8192):
                             await f.write(chunk)
-                    
+
                     return True
-                    
+
         except Exception as e:
             self.__logger.error(f"Failed to download {url}: {e}")
             return False
 
-    def _insert_media_db_blocking(self, source, playlist_id, media_id, url, basename, extension, 
-                                 nix_caption, timestamp, local_path):
+    def _insert_media_db_blocking(
+        self, source, playlist_id, media_id, url, basename, extension, nix_caption, timestamp, local_path
+    ):
         """Insert media item into database (blocking operation)."""
         try:
             last_modified = unix_to_utc_string(int(os.path.getmtime(local_path)))
-            
+
             with self.__db:
-                self.__db.execute("""
-                    INSERT INTO imported_files 
+                self.__db.execute(
+                    """
+                    INSERT INTO imported_files
                     (source, playlist_id, media_item_id, original_url, basename, extension,
                      nix_caption, orig_extension, processed, orig_timestamp, last_modified)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    source, playlist_id, media_id, url, basename, extension,
-                    nix_caption, extension, 0, timestamp, last_modified
-                ))
-                
+                """,
+                    (
+                        source,
+                        playlist_id,
+                        media_id,
+                        url,
+                        basename,
+                        extension,
+                        nix_caption,
+                        extension,
+                        0,
+                        timestamp,
+                        last_modified,
+                    ),
+                )
+
         except Exception as e:
             self.__logger.error(f"Error inserting media into database: {e}")
 
@@ -313,7 +332,7 @@ class ImportPhotos:
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        if hasattr(self, '_thread_pool'):
+        if hasattr(self, "_thread_pool"):
             self._thread_pool.shutdown(wait=True)
-        if hasattr(self, '__db'):
+        if hasattr(self, "__db"):
             self.__db.close()

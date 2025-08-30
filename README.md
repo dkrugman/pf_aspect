@@ -62,7 +62,7 @@ To find out what's new or improved have a look at the [changelog](https://github
 
 [glenvorel](https://github.com/glenvorel) Thanks for the new keyboard, mouse and touch screen support.
 
-Many Thanks to Wolfgang [www.thedigitalpictureframe.com](https://www.thedigitalpictureframe.com/) for your inspiring work. 
+Many Thanks to Wolfgang [www.thedigitalpictureframe.com](https://www.thedigitalpictureframe.com/) for your inspiring work.
 
 A special Thank to Paddy Gaunt one of the authors of the [pi3d](https://github.com/pi3d/pi3d_demos) project. You are doing a great job!
 

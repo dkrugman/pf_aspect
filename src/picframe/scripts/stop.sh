@@ -9,13 +9,13 @@ python_process_id=$(pgrep -f "python3.*picframe")
 unbuffer_process_id=$(pgrep -f "tclsh8.6.*unbuffer.*picframe")
 
 if [ -n "$python_process_id" ]; then
-    
+
     echo "Found picframe Python process (PID: $python_process_id), sending SIGTERM..."
     sudo kill -TERM $python_process_id
     echo "Waiting for graceful shutdown (allow time for stop logs to be written)..."
 
     sleep 5  # Give time for graceful shutdown and log flushing
-    
+
     # AFTER Python process has time to write logs, then stop the unbuffer process
     if [ -n "$unbuffer_process_id" ]; then
         echo "Now stopping picframe unbuffer process (PID: $unbuffer_process_id)..."

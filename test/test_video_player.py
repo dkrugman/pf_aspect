@@ -1,11 +1,12 @@
 import logging
 import os
 import time
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 logging.basicConfig(level=logging.DEBUG)
+
 
 @pytest.fixture
 def test_video_path():
@@ -15,6 +16,7 @@ def test_video_path():
         pytest.skip("Test video file not found: test.mp4 %s" % test_file)
     return test_file
 
+
 @patch("subprocess.Popen")
 def test_video_player_play(mock_popen, test_video_path):
     """Test starting the video player and playing a video file."""
@@ -23,11 +25,12 @@ def test_video_player_play(mock_popen, test_video_path):
     mock_proc.stdin = MagicMock()
     mock_proc.stdout = MagicMock()
     # Simulate the player sending state messages
-    mock_proc.stdout.__iter__.return_value = iter([
-        "STATE:PLAYING\n",
-        "STATE:ENDED\n"
-        "STATE:STOPPED\n",
-    ])
+    mock_proc.stdout.__iter__.return_value = iter(
+        [
+            "STATE:PLAYING\n",
+            "STATE:ENDED\n" "STATE:STOPPED\n",
+        ]
+    )
     mock_proc.poll.return_value = None
     mock_popen.return_value = mock_proc
 
@@ -51,10 +54,8 @@ def test_video_player_play(mock_popen, test_video_path):
     streamer.kill()
     assert mock_proc.terminate.called
 
-@pytest.mark.skipif(
-    os.environ.get("GITHUB_ACTIONS") == "true",
-    reason="Skipped on GitHub Actions CI"
-)
+
+@pytest.mark.skipif(os.environ.get("GITHUB_ACTIONS") == "true", reason="Skipped on GitHub Actions CI")
 def test_video_player_integration(test_video_path, caplog):
     """Test starting the video player and playing a video file."""
 
@@ -70,7 +71,7 @@ def test_video_player_integration(test_video_path, caplog):
     time.sleep(3)  # Allow some time for the player to start
     streamer.pause(True)
     time.sleep(3)  # Allow some time for the player to pause
-    assert streamer.is_playing() 
+    assert streamer.is_playing()
     streamer.pause(False)
     time.sleep(2)  # Allow some time for the player to start
     streamer.stop()

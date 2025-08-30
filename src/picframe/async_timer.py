@@ -15,19 +15,21 @@ Usage:
 """
 
 import asyncio
-import time
 import logging
 import sqlite3
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Callable, Awaitable, Optional
+from typing import Awaitable, Callable, Optional
+
 from .config import DB_JRNL_MODE
+
 
 class AsyncTimerManager:
     def __init__(self, model):
         self.__logger = logging.getLogger(__name__)
         self.__model = model
-        self.__db_file = str(Path(self.__model.get_model_config()['db_file']).expanduser().resolve())
+        self.__db_file = str(Path(self.__model.get_model_config()["db_file"]).expanduser().resolve())
         self.__logger.debug(f"Using database file: {self.__db_file}")
         self._tasks = []
         self._running = False
@@ -35,7 +37,7 @@ class AsyncTimerManager:
         self._running_tasks = set()  # Track running tasks for proper cleanup
         self.__db = sqlite3.connect(self.__db_file, check_same_thread=False, timeout=30.0)
         self.__db.row_factory = sqlite3.Row
-        
+
         self.__db.execute(f"PRAGMA journal_mode={DB_JRNL_MODE}")
         self.__db.execute("PRAGMA synchronous=NORMAL")
         self.__db.execute("PRAGMA foreign_keys=ON")
@@ -45,13 +47,15 @@ class AsyncTimerManager:
         self.__db.execute("PRAGMA cache_size=10000")
         self.__logger.debug(f"DB connection established")
         with self.__db:
-            self.__db.execute("""
+            self.__db.execute(
+                """
                 CREATE TABLE IF NOT EXISTS timer_state (
                     name TEXT PRIMARY KEY,
                     last_run REAL
                 )
-            """)
-        
+            """
+            )
+
     def register(self, callback: Callable[[], Awaitable[None]], interval: float, name: str) -> None:
         """Register an async function with interval (sec) and a unique name."""
         if not asyncio.iscoroutinefunction(callback):
@@ -61,12 +65,7 @@ class AsyncTimerManager:
         if last_run is None:
             last_run = time.time() - interval  # Run immediately
 
-        task = {
-            "name": name,
-            "callback": callback,
-            "interval": interval,
-            "last_run": last_run
-        }
+        task = {"name": name, "callback": callback, "interval": interval, "last_run": last_run}
         self._tasks.append(task)
 
     def start(self):
@@ -80,15 +79,15 @@ class AsyncTimerManager:
                 now = time.time()
                 coros = []
                 for task in self._tasks:
-                    due = (now - task["last_run"] >= task["interval"])
+                    due = now - task["last_run"] >= task["interval"]
                     if due:
-                        #self.__logger.debug(f"Task '{task['name']}' is due (interval: {task['interval']}s, last_run: {task['last_run']}, now: {now})")
+                        # self.__logger.debug(f"Task '{task['name']}' is due (interval: {task['interval']}s, last_run: {task['last_run']}, now: {now})")
                         task["last_run"] = now
                         self._save_last_run(task["name"], now)
                         coros.append(self._run_task(task))
                     else:
                         time_until = task["interval"] - (now - task["last_run"])
-                        #self.__logger.debug(f"Task '{task['name']}' not due yet (time_until: {time_until:.1f}s)")
+                        # self.__logger.debug(f"Task '{task['name']}' not due yet (time_until: {time_until:.1f}s)")
 
                 if coros:
                     self.__logger.debug(f"Executing {len(coros)} timer tasks")
@@ -138,7 +137,7 @@ class AsyncTimerManager:
                 return max(0.0, task["interval"] - elapsed)
         raise KeyError(f"No task registered with name '{name}'")
 
-    def _load_last_run(self, name: str) -> Optional[float]: 
+    def _load_last_run(self, name: str) -> Optional[float]:
         cur = self.__db.cursor()
         try:
             cur.execute("SELECT last_run FROM timer_state WHERE name = ?", (name,))
@@ -146,19 +145,22 @@ class AsyncTimerManager:
             return row[0] if row else None
         except Exception as e:
             self.__logger.warning(f"Error loading timer state for {name}: {e}")
-            return None 
+            return None
         finally:
             cur.close()
-        
+
     def _save_last_run(self, name: str, timestamp: float) -> None:
         self.__logger.debug(f"Saving timer state for {name}: {timestamp}")
         try:
             with self.__db:  # auto-commit
-                self.__db.execute("""
+                self.__db.execute(
+                    """
                     INSERT INTO timer_state (name, last_run)
                     VALUES (?, ?)
                     ON CONFLICT(name) DO UPDATE SET last_run=excluded.last_run
-                """, (name, timestamp))
+                """,
+                    (name, timestamp),
+                )
         except Exception as e:
             self.__logger.warning(f"Error saving timer state for {name}: {e}")
 
@@ -167,18 +169,21 @@ class AsyncTimerManager:
         try:
             with self.__db:
                 for task in self._tasks:
-                    self.__db.execute("""
+                    self.__db.execute(
+                        """
                         INSERT INTO timer_state (name, last_run)
                         VALUES (?, ?)
                         ON CONFLICT(name) DO UPDATE SET last_run=excluded.last_run
-                    """, (task["name"], task["last_run"]))
+                    """,
+                        (task["name"], task["last_run"]),
+                    )
         except Exception as e:
             self.__logger.warning(f"Error saving timer states in bulk: {e}")
 
     def stop(self):
         """Stop the timer and cancel all running tasks."""
         self.__logger.debug("Stopping AsyncTimerManager...")
-        
+
         # Save timer states
         self._save_all_states()
 
@@ -188,27 +193,29 @@ class AsyncTimerManager:
             for task in self._running_tasks.copy():
                 task.cancel()
             self._running_tasks.clear()
-        
+
         # Stop the main timer loop
         self._running = False
         if self._task and not self._task.done():
             self.__logger.debug("Cancelling main timer task...")
             self._task.cancel()
-        
+
         # Note: cleanup is now called automatically when tasks are cancelled in _run_task
-        
+
         # Close database connection
         try:
-            if hasattr(self, '_AsyncTimerManager__db') and self._AsyncTimerManager__db:
+            if hasattr(self, "_AsyncTimerManager__db") and self._AsyncTimerManager__db:
                 self._AsyncTimerManager__db.close()
                 self.__logger.debug("AsyncTimerManager database connection closed")
         except Exception as e:
             self.__logger.warning(f"Error closing AsyncTimerManager database: {e}")
-        
+
         self.__logger.debug("AsyncTimerManager stopped")
-   
+
+
 # Singleton instance of AsyncTimerManager, use init_timer(model) to instantiate.
 timer = None
+
 
 def init_timer(model):
     global timer
