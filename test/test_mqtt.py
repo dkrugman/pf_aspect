@@ -1,11 +1,12 @@
 import logging
 from unittest.mock import MagicMock, patch
-import pytest
+
 import paho.mqtt.client as mqtt
+import pytest
+
 # ensure that picframe is in the path
 # pip install -e .
 from picframe.interface_mqtt import InterfaceMQTT
-
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -39,10 +40,10 @@ def test_initialization(mock_mqtt_client, mock_controller, mqtt_config):
     mqtt_interface = InterfaceMQTT(mock_controller, mqtt_config)
 
     # Verify that the MQTT client was initialized with the correct client ID
-    mock_mqtt_client.assert_called_once_with(callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
-                                             client_id="picframe_test", clean_session=True)
-    mock_client_instance.username_pw_set.assert_called_once_with("mosquitto",
-                                                                 "OkY8tPNuDffEPf2In6QZ")
+    mock_mqtt_client.assert_called_once_with(
+        callback_api_version=mqtt.CallbackAPIVersion.VERSION2, client_id="picframe_test", clean_session=True
+    )
+    mock_client_instance.username_pw_set.assert_called_once_with("mosquitto", "OkY8tPNuDffEPf2In6QZ")
     assert mqtt_interface._InterfaceMQTT__client is not None
     assert mqtt_interface._InterfaceMQTT__client == mock_client_instance
 
@@ -64,7 +65,7 @@ def test_connect_success(mock_mqtt_client, mock_controller, mqtt_config, caplog)
 
         # Verify that the connect method was called
         mock_client_instance.connect.assert_called_once_with("home", 1883, keepalive=60)
-     
+
         # Inspect the captured logs
         assert "Creating an instance of InterfaceMQTT" in caplog.text
         assert "Initializing MQTT client" in caplog.text

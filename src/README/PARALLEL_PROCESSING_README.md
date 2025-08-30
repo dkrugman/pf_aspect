@@ -4,12 +4,12 @@ Image processing now runs **in parallel** with photo downloads, dramatically red
 
 ## How It Works
 
-**Before**: Download all photos → Wait → Process all photos (sequential)  
+**Before**: Download all photos → Wait → Process all photos (sequential)
 **After**: Download photos + Process photos simultaneously (parallel)
 
 ### Process Flow
 1. **File downloads** in batches with throttling
-2. **Each completed download** immediately starts image processing  
+2. **Each completed download** immediately starts image processing
 3. **Downloads continue** while processing runs in background
 4. **All tasks complete** before import process finishes
 
@@ -18,7 +18,7 @@ Image processing now runs **in parallel** with photo downloads, dramatically red
 **Example**: 100 photos, 5 min download + 10 min processing
 
 - **Sequential**: 5 + 10 = **15 minutes total**
-- **Parallel**: max(5, 10) = **10 minutes total**  
+- **Parallel**: max(5, 10) = **10 minutes total**
 - **Result**: **33% faster** imports
 
 ## New Methods
@@ -26,7 +26,7 @@ Image processing now runs **in parallel** with photo downloads, dramatically red
 ### `_start_image_processing_async(file_path)`
 Creates background task for immediate processing
 
-### `_process_single_image_async(file_path)`  
+### `_process_single_image_async(file_path)`
 Processes individual images asynchronously
 
 ### `_wait_for_image_processing_completion()`
@@ -52,23 +52,23 @@ Respects existing throttling settings:
 ```yaml
 aspect:
   max_concurrent_downloads: 3      # Download concurrency
-  max_concurrent_db_operations: 1  # Database operations  
+  max_concurrent_db_operations: 1  # Database operations
   download_batch_size: 5           # Batch size
 ```
 
 ## Benefits
 
-✅ **Faster imports** - Parallel execution  
-✅ **Better resource usage** - CPU and I/O overlap  
-✅ **Real-time progress** - Immediate feedback  
-✅ **Maintains stability** - Respects throttling limits  
-✅ **Easy monitoring** - Built-in status tracking  
+✅ **Faster imports** - Parallel execution
+✅ **Better resource usage** - CPU and I/O overlap
+✅ **Real-time progress** - Immediate feedback
+✅ **Maintains stability** - Respects throttling limits
+✅ **Easy monitoring** - Built-in status tracking
 
 ## Log Messages
 
 ```
 Started image processing for DSC_001.jpg
-Completed image processing for DSC_001.jpg  
+Completed image processing for DSC_001.jpg
 Waiting for 15 image processing tasks to complete...
 Image processing completed: 15 successful, 0 failed
 ```

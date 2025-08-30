@@ -1,10 +1,12 @@
-import os
-import time
-import sqlite3
-import math
-import random
 import logging
+import math
+import os
+import random
+import sqlite3
+import time
+
 import requests
+
 
 class NewSlideshow:
     """
@@ -17,11 +19,11 @@ class NewSlideshow:
         self.model = model
 
         aspect_conf = model.get_aspect_config()
-        random_org_conf = aspect_conf['services']['random_org']
+        random_org_conf = aspect_conf["services"]["random_org"]
 
-        self.frame_id = aspect_conf.get('frame_id', 'ASPECT_001')
-        self.picture_dir = os.path.expanduser(model.get_model_config()['pic_dir'])
-        self.db_file = os.path.expanduser(model.get_model_config()['db_file'])
+        self.frame_id = aspect_conf.get("frame_id", "ASPECT_001")
+        self.picture_dir = os.path.expanduser(model.get_model_config()["pic_dir"])
+        self.db_file = os.path.expanduser(model.get_model_config()["db_file"])
 
         self.api_url = random_org_conf.get("api_url")
         self.api_key = random_org_conf.get("api_key1")  # choose key rotation logic if needed
@@ -43,7 +45,7 @@ class NewSlideshow:
                 conn.row_factory = sqlite3.Row
                 c = conn.cursor()
                 c.execute("SELECT file_id, folder_id FROM file ORDER BY file_id")
-                data = c.fetchall()    
+                data = c.fetchall()
                 if not data:
                     self.__logger.warning("No files available for slideshow")
                     return None
@@ -67,14 +69,8 @@ class NewSlideshow:
             payload = {
                 "jsonrpc": "2.0",
                 "method": "generateIntegers",
-                "params": {
-                    "apiKey": self.api_key,
-                    "n": current_batch,
-                    "min": 1,
-                    "max": n_total,
-                    "replacement": False
-                },
-                "id": f"{self.frame_id}-{int(time.time()*1000)}"
+                "params": {"apiKey": self.api_key, "n": current_batch, "min": 1, "max": n_total, "replacement": False},
+                "id": f"{self.frame_id}-{int(time.time()*1000)}",
             }
 
             try:
@@ -83,10 +79,10 @@ class NewSlideshow:
                 res.raise_for_status()
                 result = res.json()
 
-                if 'error' in result:
-                    raise RuntimeError(result['error'])
+                if "error" in result:
+                    raise RuntimeError(result["error"])
 
-                new_vals = [v for v in result['result']['random']['data'] if v not in used_values]
+                new_vals = [v for v in result["result"]["random"]["data"] if v not in used_values]
                 used_values.update(new_vals)
                 all_randomized.extend(new_vals)
 
@@ -102,8 +98,8 @@ class NewSlideshow:
 
         dominant_ids = portrait_ids if len(portrait_ids) >= len(landscape_ids) else landscape_ids
         minority_ids = landscape_ids if dominant_ids == portrait_ids else portrait_ids
-        dominant_type = 'portrait' if dominant_ids == portrait_ids else 'landscape'
-        minority_type = 'landscape' if dominant_type == 'portrait' else 'portrait'
+        dominant_type = "portrait" if dominant_ids == portrait_ids else "landscape"
+        minority_type = "landscape" if dominant_type == "portrait" else "portrait"
 
         total_images = len(file_id_list)
         num_groups = math.ceil(total_images / self.target_set_size)
@@ -136,11 +132,11 @@ class NewSlideshow:
         for i in range(num_groups):
             if i % 2 == 0 or not minority_sizes:
                 size = dominant_sizes.pop(0)
-                groups.append((dominant_type, dominant_ids[d_idx:d_idx+size]))
+                groups.append((dominant_type, dominant_ids[d_idx : d_idx + size]))
                 d_idx += size
             else:
                 size = minority_sizes.pop(0)
-                groups.append((minority_type, minority_ids[m_idx:m_idx+size]))
+                groups.append((minority_type, minority_ids[m_idx : m_idx + size]))
                 m_idx += size
 
         return groups
@@ -153,7 +149,8 @@ class NewSlideshow:
 
                 # Drop and recreate the slideshow table
                 c.execute("DROP TABLE IF EXISTS slideshow")
-                c.execute("""
+                c.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS slideshow (
                         id             INTEGER PRIMARY KEY AUTOINCREMENT,
                         group_num      INTEGER NOT NULL,
@@ -165,47 +162,59 @@ class NewSlideshow:
                         created        REAL DEFAULT 0 NOT NULL,
                         played         INTEGER DEFAULT 0 NOT NULL
                     )
-                """)
+                """
+                )
 
                 # Get file metadata for all file IDs
                 all_file_ids = []
                 for g_type, ids in groups:
                     all_file_ids.extend(ids)
-                
+
                 # Fetch file metadata using row factory
-                c.execute("""
-                    SELECT f.file_id, f.basename, f.extension, f.width, f.height 
-                    FROM file f 
+                c.execute(
+                    """
+                    SELECT f.file_id, f.basename, f.extension, f.width, f.height
+                    FROM file f
                     WHERE f.file_id IN ({})
-                """.format(','.join('?' * len(all_file_ids))), all_file_ids)
-                
-                file_metadata = {row['file_id']: (row['basename'], row['extension'], row['width'], row['height']) for row in c.fetchall()}
+                """.format(
+                        ",".join("?" * len(all_file_ids))
+                    ),
+                    all_file_ids,
+                )
+
+                file_metadata = {
+                    row["file_id"]: (row["basename"], row["extension"], row["width"], row["height"])
+                    for row in c.fetchall()
+                }
 
                 insert_data = []
                 for g_num, (g_type, ids) in enumerate(groups, start=1):
                     for order, file_id in enumerate(ids, start=1):
                         if file_id in file_metadata:
                             basename, extension, width, height = file_metadata[file_id]
-                            orientation_text = 'portrait' if height > width else 'landscape'
+                            orientation_text = "portrait" if height > width else "landscape"
                             insert_data.append((g_num, order, file_id, basename, extension, orientation_text, 0))
 
-                c.executemany("""
-                    INSERT INTO slideshow (group_num, order_in_group, file_id, basename, extension, orientation, played) 
+                c.executemany(
+                    """
+                    INSERT INTO slideshow (group_num, order_in_group, file_id, basename, extension, orientation, played)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, insert_data)
+                """,
+                    insert_data,
+                )
                 # Auto-commit when exiting the with block
         except Exception as e:
             self.__logger.warning(f"Error saving slideshow: {e}")
 
     def generate_slideshow(self):
         self.__logger.debug("Loading image list from database...")
-        
+
         file_data = self.fetch_file_ids()
         if not file_data:
             self.__logger.warning("Returning None")
             return None
-        file_ids = [row['file_id'] for row in file_data]
-        folder_map = {row['file_id']: row['folder_id'] for row in file_data}
+        file_ids = [row["file_id"] for row in file_data]
+        folder_map = {row["file_id"]: row["folder_id"] for row in file_data}
 
         if self.shuffle:
             self.__logger.info("Shuffling file order using Random.org...")

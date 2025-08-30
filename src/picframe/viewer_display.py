@@ -1,21 +1,30 @@
-import os, logging, time, subprocess, pi3d  #type: ignore
-from .async_timer import init_timer
-from typing import Optional, List, Tuple
+import logging
+import os
+import subprocess
+import time
 from datetime import datetime
-from PIL import Image, ImageFilter, ImageFile, ImageOps
+from typing import List, Optional, Tuple
+
 import numpy as np
-from . import mat_image, get_image_meta
-from .video_streamer import VideoStreamer, VIDEO_EXTENSIONS, VideoFrameExtractor
+import pi3d  # type: ignore
+from PIL import Image, ImageFile, ImageFilter, ImageOps
+
+from . import get_image_meta, mat_image
+from .async_timer import init_timer
+from .video_streamer import VIDEO_EXTENSIONS, VideoFrameExtractor, VideoStreamer
 
 # supported display modes for display switch
 dpms_mode = ("unsupported", "pi", "x_dpms")
 
 # utility functions with no dependency on ViewerDisplay properties
+
+
 def txt_to_bit(txt):
     txt_map = {"title": 1, "caption": 2, "name": 4, "date": 8, "location": 16, "folder": 32}
     if txt in txt_map:
         return txt_map[txt]
     return 0
+
 
 def parse_show_text(txt):
     show_text = 0
@@ -25,55 +34,55 @@ def parse_show_text(txt):
             show_text |= txt_to_bit(txt_key)
     return show_text
 
-class ViewerDisplay:
 
+class ViewerDisplay:
     def __init__(self, config):
         self.__logger = logging.getLogger(__name__)
-        self.__logger.debug('ViewerDisplay starting')
-        self.__blur_amount = config['blur_amount']
-        self.__blur_zoom = config['blur_zoom']
-        self.__blur_edges = config['blur_edges']
-        self.__edge_alpha = config['edge_alpha']
+        self.__logger.debug("ViewerDisplay starting")
+        self.__blur_amount = config["blur_amount"]
+        self.__blur_zoom = config["blur_zoom"]
+        self.__blur_edges = config["blur_edges"]
+        self.__edge_alpha = config["edge_alpha"]
 
-        self.__mat_images, self.__mat_images_tol = self.__get_mat_image_control_values(config['mat_images'])
-        self.__mat_type = config['mat_type']
-        self.__outer_mat_color = config['outer_mat_color']
-        self.__inner_mat_color = config['inner_mat_color']
-        self.__outer_mat_border = config['outer_mat_border']
-        self.__inner_mat_border = config['inner_mat_border']
-        self.__outer_mat_use_texture = config['outer_mat_use_texture']
-        self.__inner_mat_use_texture = config['inner_mat_use_texture']
-        self.__mat_resource_folder = os.path.expanduser(config['mat_resource_folder'])
+        self.__mat_images, self.__mat_images_tol = self.__get_mat_image_control_values(config["mat_images"])
+        self.__mat_type = config["mat_type"]
+        self.__outer_mat_color = config["outer_mat_color"]
+        self.__inner_mat_color = config["inner_mat_color"]
+        self.__outer_mat_border = config["outer_mat_border"]
+        self.__inner_mat_border = config["inner_mat_border"]
+        self.__outer_mat_use_texture = config["outer_mat_use_texture"]
+        self.__inner_mat_use_texture = config["inner_mat_use_texture"]
+        self.__mat_resource_folder = os.path.expanduser(config["mat_resource_folder"])
 
-        self.__fps = config['fps']
-        self.__background = config['background']
-        self.__blend_type = {"blend": 0.0, "burn": 1.0, "bump": 2.0}[config['blend_type']]
-        self.__font_file = os.path.expanduser(config['font_file'])
-        self.__shader = os.path.expanduser(config['shader'])
-        self.__show_text_tm = float(config['show_text_tm'])
-        self.__show_text_fm = config['show_text_fm']
-        self.__show_text_sz = config['show_text_sz']
-        self.__show_text = parse_show_text(config['show_text'])
-        self.__text_justify = config['text_justify'].upper()
-        self.__text_bkg_hgt = config['text_bkg_hgt'] if 0 <= config['text_bkg_hgt'] <= 1 else 0.25
-        self.__text_opacity = config['text_opacity']
-        self.__fit = config['fit']
-        self.__video_fit_display = config['video_fit_display']
-        self.__geo_suppress_list = config['geo_suppress_list']
-        self.__kenburns = config['kenburns']
+        self.__fps = config["fps"]
+        self.__background = config["background"]
+        self.__blend_type = {"blend": 0.0, "burn": 1.0, "bump": 2.0}[config["blend_type"]]
+        self.__font_file = os.path.expanduser(config["font_file"])
+        self.__shader = os.path.expanduser(config["shader"])
+        self.__show_text_tm = float(config["show_text_tm"])
+        self.__show_text_fm = config["show_text_fm"]
+        self.__show_text_sz = config["show_text_sz"]
+        self.__show_text = parse_show_text(config["show_text"])
+        self.__text_justify = config["text_justify"].upper()
+        self.__text_bkg_hgt = config["text_bkg_hgt"] if 0 <= config["text_bkg_hgt"] <= 1 else 0.25
+        self.__text_opacity = config["text_opacity"]
+        self.__fit = config["fit"]
+        self.__video_fit_display = config["video_fit_display"]
+        self.__geo_suppress_list = config["geo_suppress_list"]
+        self.__kenburns = config["kenburns"]
         if self.__kenburns:
             self.__kb_up = True
             self.__fit = False
             self.__blur_edges = False
         if self.__blur_zoom < 1.0:
             self.__blur_zoom = 1.0
-        self.__display_x = int(config['display_x'])
-        self.__display_y = int(config['display_y'])
-        self.__display_w = None if config['display_w'] is None else int(config['display_w'])
-        self.__display_h = None if config['display_h'] is None else int(config['display_h'])
-        self.__display_power = int(config['display_power'])
-        self.__use_sdl2 = config['use_sdl2']
-        self.__use_glx = config['use_glx']
+        self.__display_x = int(config["display_x"])
+        self.__display_y = int(config["display_y"])
+        self.__display_w = None if config["display_w"] is None else int(config["display_w"])
+        self.__display_h = None if config["display_h"] is None else int(config["display_h"])
+        self.__display_power = int(config["display_power"])
+        self.__use_sdl2 = config["use_sdl2"]
+        self.__use_glx = config["use_glx"]
         self.__alpha = 0.0  # alpha - proportion front image to back
         self.__delta_alpha = 1.0
         self.__display = None
@@ -93,14 +102,14 @@ class ViewerDisplay:
         self.__matter = None
         self.__prev_clock_time = None
         self.__clock_overlay = None
-        self.__show_clock = config['show_clock']
-        self.__clock_justify = config['clock_justify']
-        self.__clock_text_sz = config['clock_text_sz']
-        self.__clock_format = config['clock_format']
-        self.__clock_opacity = config['clock_opacity']
-        self.__clock_top_bottom = config['clock_top_bottom']
-        self.__clock_wdt_offset_pct = config['clock_wdt_offset_pct']
-        self.__clock_hgt_offset_pct = config['clock_hgt_offset_pct']
+        self.__show_clock = config["show_clock"]
+        self.__clock_justify = config["clock_justify"]
+        self.__clock_text_sz = config["clock_text_sz"]
+        self.__clock_format = config["clock_format"]
+        self.__clock_opacity = config["clock_opacity"]
+        self.__clock_top_bottom = config["clock_top_bottom"]
+        self.__clock_wdt_offset_pct = config["clock_wdt_offset_pct"]
+        self.__clock_hgt_offset_pct = config["clock_hgt_offset_pct"]
         self.__image_overlay = None
         self.__prev_overlay_time = None
         self.__video_streamer = None
@@ -112,7 +121,7 @@ class ViewerDisplay:
         if self.__display_power == 0:
             try:  # vcgencmd only applies to raspberry pi
                 state = str(subprocess.check_output(["vcgencmd", "display_power"]))
-                if (state.find("display_power=1") != -1):
+                if state.find("display_power=1") != -1:
                     return True
                 else:
                     return False
@@ -123,7 +132,7 @@ class ViewerDisplay:
         elif self.__display_power == 1:
             try:  # try xset on linux, DPMS has to be enabled
                 output = subprocess.check_output(["xset", "-display", ":0", "-q"])
-                if output.find(b'Monitor is On') != -1:
+                if output.find(b"Monitor is On") != -1:
                     return True
                 else:
                     return False
@@ -134,7 +143,7 @@ class ViewerDisplay:
         elif self.__display_power == 2:
             try:
                 output = subprocess.check_output(["wlr-randr"])
-                if output.find(b'Enabled: yes') != -1:
+                if output.find(b"Enabled: yes") != -1:
                     return True
                 else:
                     return False
@@ -170,7 +179,7 @@ class ViewerDisplay:
         elif self.__display_power == 2:
             try:  # try wlr-randr for RPi5 with wayland desktop
                 wlr_randr_cmd = ["wlr-randr", "--output", "HDMI-A-1"]
-                wlr_randr_cmd.append('--on' if on_off else '--off')
+                wlr_randr_cmd.append("--on" if on_off else "--off")
                 subprocess.call(wlr_randr_cmd)
             except (ValueError, TypeError) as e:
                 self.__logger.debug("Display ON/OFF is wlr-randr, but an error occured")
@@ -197,7 +206,7 @@ class ViewerDisplay:
         if pic is not None and paused is not None:  # text needs to be refreshed
             self.__make_text(pic, paused)
         self.__name_tm = max(self.__name_tm, time.time() + self.__show_text_tm)
-        #self.__logger.debug(f"PIC: {pic} PAUSED: {paused} NAME_TM: {self.__name_tm} SHOW_TEXT_TM: {self.__show_text_tm}")
+        # self.__logger.debug(f"PIC: {pic} PAUSED: {paused} NAME_TM: {self.__name_tm} SHOW_TEXT_TM: {self.__show_text_tm}")
 
     def set_brightness(self, val):
         self.__slide.unif[55] = val  # take immediate effect
@@ -205,11 +214,13 @@ class ViewerDisplay:
             self.__clock_overlay.sprite.set_alpha(val)
         if self.__image_overlay:
             self.__image_overlay.set_alpha(val)
-        if self.__textblock:  
+        if self.__textblock:
             self.__textblock.sprite.set_alpha(val)
 
     def get_brightness(self):
-        return round(self.__slide.unif[55], 2)  # this will still give 32/64 bit differences sometimes, as will the float(format()) system # noqa: E501
+        return round(
+            self.__slide.unif[55], 2
+        )  # this will still give 32/64 bit differences sometimes, as will the float(format()) system # noqa: E501
 
     def set_matting_images(self, val):  # needs to cope with "true", "ON", 0, "0.2" etc.
         try:
@@ -240,8 +251,10 @@ class ViewerDisplay:
 
     def __orientate_image(self, im, pic):
         ext = os.path.splitext(pic.fname)[1].lower()
-        if pic.is_portrait and not(ext in ('.heif', '.heic')):  # heif and heic images are converted to PIL.Image obects and are alway in correct orienation # noqa: E501
-            #self.__logger.debug(f"TURN TURN TURN TURN TURN TURN TURN TURN TURN TURN TURN TURN {pic.fname}")
+        if pic.is_portrait and not (
+            ext in (".heif", ".heic")
+        ):  # heif and heic images are converted to PIL.Image obects and are alway in correct orienation # noqa: E501
+            # self.__logger.debug(f"TURN TURN TURN TURN TURN TURN TURN TURN TURN TURN TURN TURN {pic.fname}")
             try:
                 im = ImageOps.exif_transpose(im).rotate(90, resample=False, expand=True)
             except Exception as e:
@@ -252,9 +265,9 @@ class ViewerDisplay:
         on = True
         val = 0.01
         org_val = str(mat_images_value).lower()
-        if org_val in ('true', 'yes', 'on'):
+        if org_val in ("true", "yes", "on"):
             val = -1
-        elif org_val in ('false', 'no', 'off'):
+        elif org_val in ("false", "no", "off"):
             on = False
         else:
             try:
@@ -271,7 +284,7 @@ class ViewerDisplay:
             diff_aspect = 1 - (image_aspect / screen_aspect)
         else:
             diff_aspect = 1 - (screen_aspect / image_aspect)
-        #self.__logger.debug(f"screen_aspect: {screen_aspect}, image_aspect: {image_aspect}, diff_aspect: {diff_aspect}")
+        # self.__logger.debug(f"screen_aspect: {screen_aspect}, image_aspect: {image_aspect}, diff_aspect: {diff_aspect}")
         return (screen_aspect, image_aspect, diff_aspect)
 
     def __tex_load(self, pic, size=None):  # noqa: C901
@@ -279,9 +292,9 @@ class ViewerDisplay:
         if self.__stopping:
             self.__logger.info("Image loading cancelled - stopping in progress")
             return None
-        
+
         try:
-            #self.__logger.debug(f"loading image: {pic.fname}")
+            # self.__logger.debug(f"loading image: {pic.fname}")
             if self.__mat_images and self.__matter is None:
                 self.__matter = mat_image.MatImage(
                     display_size=(self.__display.width, self.__display.height),
@@ -292,21 +305,22 @@ class ViewerDisplay:
                     outer_mat_border=self.__outer_mat_border,
                     inner_mat_border=self.__inner_mat_border,
                     outer_mat_use_texture=self.__outer_mat_use_texture,
-                    inner_mat_use_texture=self.__inner_mat_use_texture)
+                    inner_mat_use_texture=self.__inner_mat_use_texture,
+                )
 
             # Load the image(s) and correct their orientation as necessary
             if pic:
                 im = get_image_meta.GetImageMeta.get_image_object(pic.fname)
                 if im is None:
                     return None
-                #self.__logger.debug(f"im: {im.size}")
+                # self.__logger.debug(f"im: {im.size}")
                 im = self.__orientate_image(im, pic)
 
             screen_aspect, image_aspect, diff_aspect = self.__get_aspect_diff(size, im.size)
 
             if self.__mat_images and diff_aspect > self.__mat_images_tol:
                 im = self.__matter.mat_image(im)
- 
+
             (w, h) = im.size
             screen_aspect, image_aspect, diff_aspect = self.__get_aspect_diff(size, im.size)
 
@@ -329,8 +343,9 @@ class ViewerDisplay:
                     images are rescaled near the start of this try block if w or h > max_dimension
                     so those lines might need changing too.
                     """
-                    im_b.paste(im, box=(round(0.5 * (im_b.size[0] - im.size[0])),
-                                        round(0.5 * (im_b.size[1] - im.size[1]))))
+                    im_b.paste(
+                        im, box=(round(0.5 * (im_b.size[0] - im.size[0])), round(0.5 * (im_b.size[1] - im.size[1])))
+                    )
                     im = im_b  # have to do this as paste applies in place
             tex = pi3d.Texture(im, blend=True, m_repeat=True, free_after_load=True)
         except Exception as e:
@@ -375,9 +390,16 @@ class ViewerDisplay:
         if len(final_string) > 0:
             c_rng = self.__display.width - 100  # range for x loc from L to R justified
             opacity = int(255 * float(self.__text_opacity) * self.get_brightness())
-            block = pi3d.FixedString(self.__font_file, final_string, shadow_radius=3, font_size=self.__show_text_sz,
-                                     shader=self.__flat_shader, justify=self.__text_justify, width=c_rng,
-                                     color=(255, 255, 255, opacity))
+            block = pi3d.FixedString(
+                self.__font_file,
+                final_string,
+                shadow_radius=3,
+                font_size=self.__show_text_sz,
+                shader=self.__flat_shader,
+                justify=self.__text_justify,
+                width=c_rng,
+                color=(255, 255, 255, opacity),
+            )
             adj_x = (c_rng - block.sprite.width) // 2  # half amount of space outside sprite
             if self.__text_justify == "L":
                 adj_x *= -1
@@ -407,20 +429,25 @@ class ViewerDisplay:
                     clock_text = f.read()
                     clock_text = f"{current_time}\n{clock_text}"
             opacity = int(255 * float(self.__clock_opacity))
-            self.__clock_overlay = pi3d.FixedString(self.__font_file, clock_text, font_size=self.__clock_text_sz,
-                                                    shader=self.__flat_shader, width=width, shadow_radius=3,
-                                                    justify=self.__clock_justify, color=(255, 255, 255, opacity))
+            self.__clock_overlay = pi3d.FixedString(
+                self.__font_file,
+                clock_text,
+                font_size=self.__clock_text_sz,
+                shader=self.__flat_shader,
+                width=width,
+                shadow_radius=3,
+                justify=self.__clock_justify,
+                color=(255, 255, 255, opacity),
+            )
             self.__clock_overlay.sprite.set_alpha(self.get_brightness())
             x = (width - self.__clock_overlay.sprite.width) // 2
             if self.__clock_justify == "L":
                 x *= -1
             elif self.__clock_justify == "C":
                 x = 0
-            y = (self.__display.height
-                 - self.__clock_overlay.sprite.height
-                 + self.__clock_text_sz * 0.5
-                 - hgt_offset
-                 ) // 2
+            y = (
+                self.__display.height - self.__clock_overlay.sprite.height + self.__clock_text_sz * 0.5 - hgt_offset
+            ) // 2
             # Handle whether to draw the clock at top or bottom
             if self.__clock_top_bottom == "B":
                 y *= -1
@@ -441,13 +468,15 @@ class ViewerDisplay:
         change_time = os.path.getmtime(overlay_file)
         if self.__prev_overlay_time is None or self.__prev_overlay_time < change_time:  # load Texture
             self.__prev_overlay_time = change_time
-            overlay_texture = pi3d.Texture(overlay_file,
-                                           blend=False,  # TODO check generally OK with blend=False
-                                           free_after_load=True,
-                                           mipmap=False)
-            self.__image_overlay = pi3d.Sprite(w=self.__display.width,
-                                               h=self.__display.height,
-                                               z=4.1)  # just behind text_bkg
+            overlay_texture = pi3d.Texture(
+                overlay_file,
+                blend=False,  # TODO check generally OK with blend=False
+                free_after_load=True,
+                mipmap=False,
+            )
+            self.__image_overlay = pi3d.Sprite(
+                w=self.__display.width, h=self.__display.height, z=4.1
+            )  # just behind text_bkg
             self.__image_overlay.set_draw_details(self.__flat_shader, [overlay_texture])
             self.__image_overlay.set_alpha(self.get_brightness())
         if self.__image_overlay is not None:  # shouldn't be possible to get here otherwise, but just in case!
@@ -466,11 +495,16 @@ class ViewerDisplay:
 
     def slideshow_start(self):
         self.__display = pi3d.Display.create(
-            x=self.__display_x, y=self.__display_y,
-            w=self.__display_w, h=self.__display_h, frames_per_second=self.__fps,
+            x=self.__display_x,
+            y=self.__display_y,
+            w=self.__display_w,
+            h=self.__display_h,
+            frames_per_second=self.__fps,
             display_config=pi3d.DISPLAY_CONFIG_HIDE_CURSOR | pi3d.DISPLAY_CONFIG_NO_FRAME,
-            background=self.__background, use_glx=self.__use_glx,
-            use_sdl2=self.__use_sdl2)
+            background=self.__background,
+            use_glx=self.__use_glx,
+            use_sdl2=self.__use_sdl2,
+        )
         camera = pi3d.Camera(is_3d=False)
         shader = pi3d.Shader(self.__shader)
         self.__slide = pi3d.Sprite(camera=camera, w=self.__display.width, h=self.__display.height, z=5.0)
@@ -486,8 +520,9 @@ class ViewerDisplay:
             text_bkg_array = np.zeros((bkg_hgt, 1, 4), dtype=np.uint8)
             text_bkg_array[:, :, 3] = np.linspace(0, 120, bkg_hgt).reshape(-1, 1)
             text_bkg_tex = pi3d.Texture(text_bkg_array, blend=True, mipmap=False, free_after_load=True)
-            self.__text_bkg = pi3d.Sprite(w=self.__display.width,
-                                          h=bkg_hgt, y=-int(self.__display.height) // 2 + bkg_hgt // 2, z=4.0)
+            self.__text_bkg = pi3d.Sprite(
+                w=self.__display.width, h=bkg_hgt, y=-int(self.__display.height) // 2 + bkg_hgt // 2, z=4.0
+            )
             self.__text_bkg.set_draw_details(self.__flat_shader, [text_bkg_tex])
 
     def __load_video_frames(self, video_path: str) -> Optional[tuple[pi3d.Texture, pi3d.Texture]]:
@@ -508,7 +543,7 @@ class ViewerDisplay:
         if self.__stopping:
             self.__logger.info("Video frame loading cancelled - stopping in progress")
             return None
-        
+
         try:
             self.__logger.debug("Loading video frames: %s", video_path)
             extractor = VideoFrameExtractor(
@@ -529,9 +564,13 @@ class ViewerDisplay:
             self.__logger.warning("Cause: %s", e)
             return None
 
-    def slideshow_transition(self, pic: Optional[List[Optional[get_image_meta.GetImageMeta]]] = None,
-                             time_delay: float = 200.0, fade_time: float = 10.0,
-                             paused: bool = False) -> Tuple[bool, bool, bool]:
+    def slideshow_transition(
+        self,
+        pic: Optional[List[Optional[get_image_meta.GetImageMeta]]] = None,
+        time_delay: float = 200.0,
+        fade_time: float = 10.0,
+        paused: bool = False,
+    ) -> Tuple[bool, bool, bool]:
         """
         Handles the slideshow logic, including transitioning between images or videos.
 
@@ -539,9 +578,9 @@ class ViewerDisplay:
         Transition begins when next frame is called --> TIME 0
         Fade time, time_delay, name_tm, show_text_tm etc. are all relative to TIME 0
         Next image time is set to TIME 0 + time_delay
-    
+
         OLD:
-        
+
         Parameters:
         -----------
         pic : Optional[List[Optional[get_image_meta.GetImageMeta]]], optional
@@ -565,21 +604,25 @@ class ViewerDisplay:
         if self.__stopping:
             self.__logger.info("Slideshow transition cancelled - stopping in progress")
             return (False, True, False)
-        
+
         loop_running = False
         if fade_time > time_delay:
-            self.__logger.warning("Fade time %f is longer than time delay %f, setting fade time to half of display time", fade_time, time_delay)  # noqa: E501
+            self.__logger.warning(
+                "Fade time %f is longer than time delay %f, setting fade time to half of display time",
+                fade_time,
+                time_delay,
+            )  # noqa: E501
             fade_time = time_delay / 2
 
-        end_time = time.time() + fade_time 
-        while time.time() < end_time + .5:           
+        end_time = time.time() + fade_time
+        while time.time() < end_time + 0.5:
             # Check if slideshow should stop during the loop
             if self.__stopping:
                 self.__logger.info("Slideshow loop cancelled - stopping in progress")
                 return (False, True, False)
-            
+
             video_playing = False
-            if self.is_video_playing():                # if video is playing, we are done here
+            if self.is_video_playing():  # if video is playing, we are done here
                 self.pause_video(paused)
                 video_playing = True
                 if self.__last_frame_tex is not None:  # first time through
@@ -636,7 +679,9 @@ class ViewerDisplay:
                 self.__slide.unif[os1] = (wh_rat - 1.0) * 0.5
                 self.__slide.unif[os2] = 0.0
                 if self.__kenburns:
-                    self.__xstep, self.__ystep = (self.__slide.unif[i] * 2.0 / (time_delay - fade_time) for i in (48, 49))
+                    self.__xstep, self.__ystep = (
+                        self.__slide.unif[i] * 2.0 / (time_delay - fade_time) for i in (48, 49)
+                    )
                     self.__slide.unif[48] = 0.0
                     self.__slide.unif[49] = 0.0
 
@@ -664,9 +709,12 @@ class ViewerDisplay:
                         # start video stream
                         if self.__video_streamer is None or not self.__video_streamer.player_alive():
                             self.__video_streamer = VideoStreamer(
-                                self.__display_x, self.__display_y,
-                                self.__display.width, self.__display.height,
-                                self.__video_path, fit_display=self.__video_fit_display
+                                self.__display_x,
+                                self.__display_y,
+                                self.__display.width,
+                                self.__display.height,
+                                self.__video_path,
+                                fit_display=self.__video_fit_display,
                             )
                         else:
                             self.__video_streamer.play(self.__video_path)
@@ -690,28 +738,27 @@ class ViewerDisplay:
                 ramp_pt = max(4.0, self.__show_text_tm / 4.0)  # always > 4 so text fade will always < 4s
 
                 # create single saw tooth over 0 to __show_text_tm
-                alpha = max(0.0, min(1.0, ramp_pt * (1.0 - abs(1.0 - 2.0 * dt))))  # function only run if image alpha is 1.0 so can use 1.0 - abs... # noqa: E501
+                alpha = max(
+                    0.0, min(1.0, ramp_pt * (1.0 - abs(1.0 - 2.0 * dt)))
+                )  # function only run if image alpha is 1.0 so can use 1.0 - abs... # noqa: E501
 
                 # if we have text, set it's current alpha value to fade in/out
                 show_bkg = False
                 if self.__textblock:
                     self.__textblock.sprite.set_alpha(alpha)
                     if self.__text_bkg_hgt:
-                        show_bkg = True  
-                
-                if show_bkg:  # only draw background if text 
+                        show_bkg = True
+
+                if show_bkg:  # only draw background if text
                     self.__text_bkg.set_alpha(alpha)
                     self.__text_bkg.draw()
 
                 if self.__textblock is not None:
                     self.__textblock.sprite.draw()
-        return (loop_running, False, video_playing)  # now returns tuple with skip image flag and video_time added 
-        
-
-
+        return (loop_running, False, video_playing)  # now returns tuple with skip image flag and video_time added
 
     # #return (loop_running, skip_image, video_playing)  # now returns tuple with skip image flag and video_time added
-    
+
     def stop_video(self):
         """
         Stops the video playback if a video is currently playing.
