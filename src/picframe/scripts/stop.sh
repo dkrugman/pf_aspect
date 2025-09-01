@@ -23,7 +23,7 @@ if [ -n "$python_process_id" ]; then
     fi
 
     # Check if still running
-    if ps -p $unbuffer_process_id > /dev/null; then
+    if [ -n "$unbuffer_process_id" ] && ps -p $unbuffer_process_id > /dev/null; then
         echo "Unbuffer process did not terminate gracefully, killing forcefully..."
         sudo kill -9 $unbuffer_process_id
     else

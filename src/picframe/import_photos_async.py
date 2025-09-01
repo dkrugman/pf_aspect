@@ -105,12 +105,12 @@ class ImportPhotos:
 
         self._importing = True
         try:
-            self.__logger.info("Starting async photo import process...")
+            self.__logger.debug("Starting async photo import process...")
 
             # Process each source
             for source_config in self.__sources:
                 source_name = source_config.get("name", "unknown")
-                self.__logger.info(f"Processing source: {source_name}")
+                self.__logger.debug(f"Processing source: {source_name}")
 
                 try:
                     await self._process_source_async(source_config)
@@ -119,7 +119,7 @@ class ImportPhotos:
                     continue
 
             # Process images after importing
-            self.__logger.info("Starting image processing...")
+            self.__logger.debug("Starting image processing...")
             processor = ProcessImages(self.__model)
             await processor.process_images()
 
@@ -127,7 +127,7 @@ class ImportPhotos:
             self.__logger.error(f"Error during import: {e}")
         finally:
             self._importing = False
-            self.__logger.info("Photo import process completed.")
+            self.__logger.debug("Photo import process completed.")
 
     async def _process_source_async(self, source_config):
         """Process a single import source asynchronously."""
@@ -142,7 +142,7 @@ class ImportPhotos:
         # Process each playlist
         for playlist in playlists:
             playlist_id = playlist.get("id")
-            self.__logger.info(f"Processing playlist: {playlist_id}")
+            self.__logger.debug(f"Processing playlist: {playlist_id}")
 
             try:
                 # Get media items for this playlist
@@ -193,7 +193,7 @@ class ImportPhotos:
         if not media_items:
             return
 
-        self.__logger.info(f"Downloading {len(media_items)} media items for playlist {playlist_id}")
+        self.__logger.debug(f"Downloading {len(media_items)} media items for playlist {playlist_id}")
 
         import_dir_path = Path(os.path.expanduser(self.__import_dir))
         import_dir_path.mkdir(parents=True, exist_ok=True)
@@ -213,7 +213,7 @@ class ImportPhotos:
         # Log results
         success_count = sum(1 for r in results if r is True)
         error_count = len(results) - success_count
-        self.__logger.info(f"Download complete: {success_count} successful, {error_count} failed")
+        self.__logger.debug(f"Download complete: {success_count} successful, {error_count} failed")
 
     async def _download_item_async(self, semaphore, source, playlist_id, item, import_dir_path):
         """Download a single media item asynchronously."""
@@ -260,7 +260,7 @@ class ImportPhotos:
                     str(local_path),
                 )
 
-                self.__logger.info(f"Successfully imported: {full_name}")
+                self.__logger.debug(f"Successfully imported: {full_name}")
                 return True
 
             except Exception as e:

@@ -40,7 +40,7 @@ def parse_filename_metadata(filename, configured_sources=None):
 
         # Validate that source is in the configured sources if provided
         if configured_sources and source not in configured_sources:
-            logger.warning(
+            logger.debug_detailed(
                 f"Source '{source}' not found in configured sources. "
                 f"Available sources: {list(configured_sources.keys())}"
             )
@@ -51,11 +51,11 @@ def parse_filename_metadata(filename, configured_sources=None):
             playlist = playlist_str
         else:
             playlist = None
-            logger.warning(f"Playlist part '{playlist_str}' is not numeric in filename: {filename}")
+            logger.debug_detailed(f"Playlist part '{playlist_str}' is not numeric in filename: {filename}")
     else:
         source = "unknown"
         playlist = None
-        logger.warning(f"Filename '{filename}' does not follow expected format: source-playlist-...")
+        logger.debug_detailed(f"Filename '{filename}' does not follow expected format: source-playlist-...")
 
     return source, playlist
 

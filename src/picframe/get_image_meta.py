@@ -30,7 +30,7 @@ class GetImageMeta:
         self.__logger = logging.getLogger(__name__)
         self.__tags = {}
         self.__filename = filename  # in case no exif data in which case needed for size
-        self.__logger.debug(f"Processing image: {filename}")
+        self.__logger.debug_detailed(f"Processing for metadata, image: {filename}")
         self.__image_width: int = 0
         self.__image_height: int = 0
         image = self.get_image_object(filename)

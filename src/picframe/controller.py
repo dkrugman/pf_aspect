@@ -30,7 +30,7 @@ class Controller:
     def __init__(self, model, viewer):
         self.__logger = logging.getLogger(__name__)
         self.__logger.setLevel(model.get_model_config()["log_level"])
-        self.__logger.debug("Creating an instance of Controller")
+        self.__logger.debug_detailed("Creating an instance of Controller")
 
         self.__model = model
         self.__viewer = viewer
@@ -81,7 +81,7 @@ class Controller:
             self.__logger.warning("No image found.")
             return
 
-        self.__logger.info("ADVANCE: %s", pic.fname)
+        self.__logger.debug("ADVANCE: %s", pic.fname)
         image_attr = self._build_image_attr(pic)
         if self.__mqtt_config["use_mqtt"]:
             self.publish_state(pic.fname, image_attr)
@@ -90,7 +90,7 @@ class Controller:
         fade_time = self.__model.fade_time
 
         self.__model.pause_looping = self.__viewer.is_in_transition()
-        self.__logger.debug("Slideshow transition: %s", pic.fname if pic else "None")
+        self.__logger.debug_detailed("Slideshow transition: %s", pic.fname if pic else "None")
 
         _, skip_image, video_playing = self.__viewer.slideshow_transition(pic, time_delay, fade_time, self.__paused)
         if skip_image or video_playing:
@@ -136,9 +136,9 @@ class Controller:
                     return
 
                 # Start the import process
-                self.__logger.info("Starting async photo import...")
+                self.__logger.debug("Starting async photo import...")
                 await importer.check_for_updates()
-                self.__logger.info("Import completed!")
+                self.__logger.debug("Import completed!")
 
         except Exception as e:
             self.__logger.exception(f"Import task failed: {e}")
@@ -156,7 +156,6 @@ class Controller:
         self.__viewer.slideshow_start()
         self.__interface_peripherals = InterfacePeripherals(self.__model, self.__viewer, self)
         self._import_photos = import_photos.ImportPhotos(self.__model)
-        # Remove immediate import task - timer will handle initial import
         self._process_images = process_images.ProcessImages(self.__model)
 
         self.__timer = init_timer(self.__model)
@@ -239,8 +238,6 @@ class Controller:
             self.__logger.warning(f"Found other picframe processes running: PIDs {', '.join(other_pids)}")
             self.__logger.warning("This Raspberry Pi is dedicated to picframe, so only one instance should be running.")
             self.__logger.warning("Consider stopping the other processes or restarting the system.")
-        # else:
-        # self.__logger.debug("No other picframe processes detected.")
 
     def _get_other_picframe_pids(self):
         """Get list of other picframe process PIDs (excluding current process)."""
@@ -272,9 +269,8 @@ class Controller:
                             # 3. Subprocess.run processes for checking running processes (ps, pgrep)
                             exclude = (
                                 ("python" in cmd_line and "picframe" in cmd_line)
-                                or
                                 # TCL unbuffer processes
-                                ("tcl" in cmd_line and "unbuffer" in cmd_line and "picframe" in cmd_line)
+                                or ("tcl" in cmd_line and "unbuffer" in cmd_line and "picframe" in cmd_line)
                                 or ("pgrep" in cmd_line and "picframe" in cmd_line)
                                 or ("ps" in cmd_line and "-p" in cmd_line and "args=" in cmd_line)
                             )
@@ -297,7 +293,7 @@ class Controller:
         import os
         import sys
 
-        self.__logger.info("Initiating automatic picframe restart...")
+        self.__logger.debug("Initiating automatic picframe restart...")
 
         try:
             # Get the current script path and arguments
@@ -395,5 +391,5 @@ class Controller:
             else f"Signal {sig} received, stopping picframe..."
         )
         self.stop()
-        self.__logger.info(msg)
+        self.__logger.debug(msg)
         self.keep_looping = False

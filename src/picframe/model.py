@@ -8,6 +8,38 @@ import yaml
 
 from . import geo_reverse, image_cache
 
+# Add custom debug levels for more granular logging control
+DEBUG_VERBOSE = 5
+DEBUG_DETAILED = 8
+DEBUG_BASIC = 12
+
+# Add the custom levels to the logging module
+logging.addLevelName(DEBUG_VERBOSE, "DEBUG_VERBOSE")
+logging.addLevelName(DEBUG_DETAILED, "DEBUG_DETAILED")
+logging.addLevelName(DEBUG_BASIC, "DEBUG_BASIC")
+
+
+# Create convenience methods for the custom debug levels
+def debug_verbose(self, message, *args, **kwargs):
+    if self.isEnabledFor(DEBUG_VERBOSE):
+        self._log(DEBUG_VERBOSE, message, args, **kwargs)
+
+
+def debug_detailed(self, message, *args, **kwargs):
+    if self.isEnabledFor(DEBUG_DETAILED):
+        self._log(DEBUG_DETAILED, message, args, **kwargs)
+
+
+def debug_basic(self, message, *args, **kwargs):
+    if self.isEnabledFor(DEBUG_BASIC):
+        self._log(DEBUG_BASIC, message, args, **kwargs)
+
+
+# Add methods to Logger class
+logging.Logger.debug_verbose = debug_verbose
+logging.Logger.debug_detailed = debug_detailed
+logging.Logger.debug_basic = debug_basic
+
 DEFAULT_CONFIGFILE = "~/picframe_data/config/configuration.yaml"
 DEFAULT_CONFIG = {
     "viewer": {
@@ -40,12 +72,12 @@ DEFAULT_CONFIG = {
         "test_key": "test_value",
         "mat_images": True,
         "mat_type": None,
-        "outer_mat_color": None,
-        "inner_mat_color": None,
-        "outer_mat_border": 75,
-        "inner_mat_border": 40,
+        "outer_mat_color": [0, 0, 0],
+        "inner_mat_color": [0, 0, 0],
+        "outer_mat_border": 0,
+        "inner_mat_border": 0,
         "inner_mat_use_texture": False,
-        "outer_mat_use_texture": True,
+        "outer_mat_use_texture": False,
         "mat_resource_folder": "~/picframe_data/data/mat",
         "show_clock": False,
         "clock_justify": "R",
@@ -86,8 +118,9 @@ DEFAULT_CONFIG = {
         "db_file": "~/picframe_data/data/pictureframe.db3",
         "deleted_pictures": "~/DeletedPictures",
         "update_interval": 2.0,
-        "log_level": "WARNING",
-        "log_file": "",
+        "root_log_level": "WARNING",
+        "log_level": "",
+        "log_file": "picframe.log",
         "location_filter": "",
         "tags_filter": "",
     },
@@ -102,14 +135,16 @@ DEFAULT_CONFIG = {
         "device_url": "",
     },
     "http": {
-        "use_http": False,
+        "use_http": True,
         "path": "~/picframe_data/html",
         "port": 9000,
-        # Automatically restart picframe when port conflicts with other picframe processes
-        "auto_restart_on_conflict": True,
-        "use_ssl": False,
-        "keyfile": "/path/to/key.pem",
-        "certfile": "/path/to/fullchain.pem",
+        "auto_restart_on_conflict": True,  # Auto restart picframe when port conflicts
+        "auth": False,  # Set True if enable basic auth for http
+        "username": "admin",  # username for basic auth
+        "password": "",  # password for basic auth. If null, generate random password in basic_auth.txt
+        "use_ssl": False,  # Set True if enable ssl for http
+        "keyfile": "/path/to/key.pem",  # private-key
+        "certfile": "/path/to/fullchain.pem",  # server certificate
     },
     "peripherals": {
         "input_type": None,  # valid options: {None, "keyboard", "touch", "mouse"}
@@ -124,14 +159,35 @@ DEFAULT_CONFIG = {
     "aspect": {
         "enable": True,  # Set to True for Aspect frames
         "frame_id": "ASPECT_001",  # unique id of the frame
-        "import_dir": "~/picframe_data/imports",  # location for imported photos before processing
+        "import_dir": "~/Pictures/Imports",  # location for imported photos before processing
         "import_interval": 900,  # secsonds between checks for updates from cloud default: 900 (15 min)
         "process_interval": 300,  # secsonds between checks for files to process defsult: 300 (5 min)
+        "max_concurrent_downloads": 3,  # maximum concurrent file downloads (default: 3)
+        "max_concurrent_db_operations": 1,  # maximum concurrent database operations (default: 1)
+        "download_batch_size": 5,  # number of items to process in each batch (default: 5)
         "min_rotation_interval": 30,  # minimum time in seconds between rotations
         "target_set_size": 10,  # target number of images in each orientation
         "min_set_size": 3,  # minimum number of images in each orientationgroup
+        "JPEG_XL": False,
+        "square_img": "Landscape",  # display mode for square images, "Landscape" or "Portrait" or "Square"
         "width": 2894,  # width of the visible display in pixels
         "height": 2160,  # height of the visible display in pixels
+        "landscape": {
+            "display_w": 2894,
+            "display_h": 2160,
+            "display_x": 473,
+            "display_y": 0,
+        },
+        "portrait": {
+            "display_w": 2894,
+            "display_h": 2160,
+            "display_x": 473,
+            "display_y": 0,
+        },
+        "default": "Landscape",
+        "smart_crop": True,
+        "resampling_kernel": "LANCZOS",  # possible: "NEAREST", "BILINEAR", "BICUBIC", "LANCZOS", "BOX", "HAMMING"
+        "simple_crop_fallback": True,
         "sources": {
             "nixplay": {
                 "enable": True,
@@ -254,14 +310,24 @@ class Model:
                         )
                     else:
                         self.__config[section] = {**DEFAULT_CONFIG[section], **conf[section]}
-                        self.__logger.debug("config data = %s", self.__config)
+                        self.__logger.debug_detailed("config data = %s", self.__config)
             except yaml.YAMLError as exc:
                 self.__logger.error("Can't parse yaml config file: %s: %s", configfile, exc)
         model_config = self.get_model_config()  # alias for brevity as used several times below
         aspect_config = self.get_aspect_config()  # alias for brevity as used several times below
-        self.__logger.setLevel(model_config["log_level"])  # set model logger
+        # Set logging level with support for custom debug levels
+        log_level_str = model_config["log_level"].upper()
+        if log_level_str == "DEBUG_VERBOSE":
+            level = DEBUG_VERBOSE
+        elif log_level_str == "DEBUG_DETAILED":
+            level = DEBUG_DETAILED
+        elif log_level_str == "DEBUG_BASIC":
+            level = DEBUG_BASIC
+        else:
+            level = getattr(logging, log_level_str, logging.WARNING)
+
+        self.__logger.setLevel(level)  # set model logger
         root_logger = logging.getLogger()
-        level = getattr(logging, self.get_model_config()["log_level"].upper(), logging.WARNING)
         root_logger.setLevel(level)
         log_file = self.get_model_config()["log_file"]
         if log_file != "":
@@ -290,7 +356,7 @@ class Model:
         # Ensure picture directory exists
         pic_path = Path(self.__pic_dir)
         pic_path.mkdir(parents=True, exist_ok=True)
-        self.__logger.debug(f"Picture directory ensured: {pic_path}")
+        self.__logger.debug_detailed(f"Picture directory ensured: {pic_path}")
 
         self.__subdirectory = os.path.expanduser(model_config["subdirectory"])
         self.__load_geoloc = model_config["load_geoloc"]
@@ -300,7 +366,7 @@ class Model:
         # Ensure database directory exists
         db_file_path = Path(os.path.expanduser(model_config["db_file"]))
         db_file_path.parent.mkdir(parents=True, exist_ok=True)
-        self.__logger.debug(f"Database directory ensured: {db_file_path.parent}")
+        self.__logger.debug_detailed(f"Database directory ensured: {db_file_path.parent}")
 
         self.__image_cache = image_cache.ImageCache(
             self.__pic_dir,
@@ -320,7 +386,7 @@ class Model:
         self.tags_filter = model_config["tags_filter"]
 
         if aspect_config["enable"]:
-            self.__logger.info("Aspect mode enabled")
+            self.__logger.debug_detailed("Aspect mode enabled")
             self.__aspect_enabled = True
             self.__frame_id = aspect_config["frame_id"]
             self.__import_interval = aspect_config["import_interval"]
@@ -400,7 +466,7 @@ class Model:
                 self.__subdirectory = ""
             else:
                 self.__subdirectory = dir
-            self.__logger.info("Set subdirectory to: %s", self.__subdirectory)
+            self.__logger.debug("Set subdirectory to: %s", self.__subdirectory)
             self.__reload_files = True
 
     @property
@@ -520,10 +586,10 @@ class Model:
 
     def get_next_file(self):  # MAIN LOOP: keep getting next file
         pic = None  # Initialize pic to avoid UnboundLocalError
-        # self.__logger.debug("get_next_file called, number of files:  %s. File Index: %s",
+        # self.__logger.debug_detailed("get_next_file called, number of files:  %s. File Index: %s",
         #                    self.__number_of_files, self.__file_index)
         # Check for active slideshow
-        # self.__logger.debug("is_active_slideshow: %s", self.__image_cache._is_active_slideshow())
+        # self.__logger.debug_detailed("is_active_slideshow: %s", self.__image_cache._is_active_slideshow())
         if self.__image_cache._is_active_slideshow():
             # Return next image from slideshow
             pic = self.__image_cache.get_next_file_from_slideshow()

@@ -282,7 +282,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     self.connection.close()
                     page_ok = True
 
-                self.server._logger.info(message)
+                self.server._logger.debug(message)
                 self.server._logger.debug("request finished in:  %s seconds" % (time.time() - start_time))
             if not page_ok:
                 self.send_response(404)
@@ -346,7 +346,7 @@ class InterfaceHttp(HTTPServer):
         # NB name mangling throws a spanner in the works here!!!!!
         # *no* __dunders
         self._logger = logging.getLogger(__name__)
-        self._logger.info(f"creating an instance of InterfaceHttp on port {port}")
+        self._logger.debug_detailed(f"creating an instance of InterfaceHttp on port {port}")
         self._controller = controller
         self._pic_dir = os.path.expanduser(pic_dir)
         self._no_files_img = os.path.expanduser(no_files_img)

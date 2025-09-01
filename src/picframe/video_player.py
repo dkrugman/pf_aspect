@@ -192,7 +192,7 @@ class VideoPlayer:
     def _send_state(self, state: str) -> None:
         """Send state to stdout only if it changed."""
         if state != self.last_state:
-            self.logger.info("State changed to: %s", state)
+            self.logger.debug("State changed to: %s", state)
             print(f"STATE:{state}", flush=True)
             self.last_state = state
 

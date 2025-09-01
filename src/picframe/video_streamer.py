@@ -21,21 +21,22 @@ Dependencies:
 - PIL (Pillow): For image processing.
 - subprocess: For running external commands (FFmpeg and FFprobe).
 """
-import sys
-import threading
-from typing import Optional, Tuple, cast
-from datetime import datetime
 import json
 import logging
-import subprocess
 import os
+import subprocess
+import sys
+import threading
 import time
+from datetime import datetime
+from typing import Optional, Tuple, cast
+
 import numpy as np
 from PIL import Image
 
 from .video_metadata import VideoMetadata
 
-VIDEO_EXTENSIONS = ['.mp4', '.mkv', '.flv', '.mov', '.avi', '.webm', '.hevc']
+VIDEO_EXTENSIONS = [".mp4", ".mkv", ".flv", ".mov", ".avi", ".webm", ".hevc"]
 
 _image_file_lock = threading.Lock()
 
@@ -46,22 +47,33 @@ def get_video_info(video_path: str) -> VideoMetadata:
     start_time = time.time()
     try:
         cmd = [
-            "ffprobe", "-v", "error",
-            "-select_streams", "v:0",
-            "-show_entries", "stream=width,height,duration,sample_aspect_ratio",
-            "-show_entries", "stream_side_data=rotation",
-            "-show_entries", "format=duration",
-            "-show_entries", "format_tags=title,description,comment,caption,creation_time,location",
-            "-show_entries", "format_tags=location-eng,com.apple.quicktime.location.ISO6709",
-            "-show_entries", "format_tags=com.apple.quicktime.make,com.apple.quicktime.model",
-            "-show_entries", "format_tags=com.android.version",
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height,duration,sample_aspect_ratio",
+            "-show_entries",
+            "stream_side_data=rotation",
+            "-show_entries",
+            "format=duration",
+            "-show_entries",
+            "format_tags=title,description,comment,caption,creation_time,location",
+            "-show_entries",
+            "format_tags=location-eng,com.apple.quicktime.location.ISO6709",
+            "-show_entries",
+            "format_tags=com.apple.quicktime.make,com.apple.quicktime.model",
+            "-show_entries",
+            "format_tags=com.android.version",
             # Add more show_entries if needed for extra fields
-            "-show_entries", "stream_tags=make,model,lens,iso_speed,exposure_time,f_number,focal_length,rating",
-            "-of", "json",
-            video_path
+            "-show_entries",
+            "stream_tags=make,model,lens,iso_speed,exposure_time,f_number,focal_length,rating",
+            "-of",
+            "json",
+            video_path,
         ]
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                text=True, check=True)
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
         info = json.loads(result.stdout)
 
         stream = info["streams"][0]
@@ -82,11 +94,7 @@ def get_video_info(video_path: str) -> VideoMetadata:
         # Get duration from stream or format
         # Default duration to 0.0 if not found
         duration = 0.0
-        duration = (
-            float(stream.get("duration", 0)) or
-            float(format_sec.get("duration", 0)) or
-            duration
-        )
+        duration = float(stream.get("duration", 0)) or float(format_sec.get("duration", 0)) or duration
 
         # Get metadata from format tags
         tags = format_sec.get("tags", {})
@@ -95,10 +103,10 @@ def get_video_info(video_path: str) -> VideoMetadata:
         # Extract metadata fields
         title = tags.get("title")
         caption = (
-            tags.get("caption") or
-            tags.get("description") or
-            tags.get("comment") or
-            tags.get("com.apple.quicktime.description")
+            tags.get("caption")
+            or tags.get("description")
+            or tags.get("comment")
+            or tags.get("com.apple.quicktime.description")
         )
 
         # Extract creation date
@@ -118,23 +126,19 @@ def get_video_info(video_path: str) -> VideoMetadata:
             try:
                 file_ctime = os.path.getctime(video_path)
                 creation_date = datetime.fromtimestamp(file_ctime)
-                logger.debug("Using file creation time: %s", creation_date)
+                logger.debug_detailed("Using file creation time: %s", creation_date)
             except OSError as e:
                 logger.warning("Could not get file creation time: %s", e)
 
         # Extract GPS coordinates
         gps_coords = None
-        loc_str = (
-            tags.get("location") or
-            tags.get("location-eng") or
-            tags.get("com.apple.quicktime.location.ISO6709")
-        )
+        loc_str = tags.get("location") or tags.get("location-eng") or tags.get("com.apple.quicktime.location.ISO6709")
         if loc_str:
             try:
                 # Parse ISO6709 format: ±DD.DDDD±DDD.DDDD+HHH.HHH/
-                if '/' in loc_str:
+                if "/" in loc_str:
                     # Split at each sign and remove trailing slash
-                    parts = loc_str.strip('/').replace('+', ' +').replace('-', ' -').split()
+                    parts = loc_str.strip("/").replace("+", " +").replace("-", " -").split()
                     if len(parts) >= 2:  # At least latitude and longitude
                         lat = float(parts[0])
                         lon = float(parts[1])
@@ -145,14 +149,8 @@ def get_video_info(video_path: str) -> VideoMetadata:
         # --- Additional fields extraction ---
         # Try to extract from stream_tags, fallback to None if not present
         f_number = stream_tags.get("f_number")
-        make = (
-            stream_tags.get("make") or
-            tags.get("com.apple.quicktime.make")
-        )
-        model = (
-            stream_tags.get("model") or
-            tags.get("com.apple.quicktime.model")
-        )
+        make = stream_tags.get("make") or tags.get("com.apple.quicktime.make")
+        model = stream_tags.get("model") or tags.get("com.apple.quicktime.model")
         lens = stream_tags.get("lens")
         iso = stream_tags.get("iso_speed")
         exposure_time = stream_tags.get("exposure_time")
@@ -183,25 +181,28 @@ def get_video_info(video_path: str) -> VideoMetadata:
         )
 
         elapsed = time.time() - start_time
-        logger.debug("Video metadata extraction for %s took %.3f seconds", video_path, elapsed)
-        logger.debug("Video metadata: %s", {
-            'dimensions': f"{metadata.width}x{metadata.height}",
-            'duration': f"{metadata.duration:.1f}s",
-            'rotation': metadata.rotation,
-            'title': metadata.title,
-            'caption': metadata.caption,
-            'creation_date': metadata.creation_date,
-            'gps': metadata.gps_coords,
-            'f_number': metadata.f_number,
-            'make': metadata.make,
-            'model': metadata.model,
-            'lens': metadata.lens,
-            'iso': metadata.iso,
-            'exposure_time': metadata.exposure_time,
-            'focal_length': metadata.focal_length,
-            'rating': metadata.rating,
-            'tags': metadata.tags,
-        })
+        logger.debug_detailed("Video metadata extraction for %s took %.3f seconds", video_path, elapsed)
+        logger.debug_detailed(
+            "Video metadata: %s",
+            {
+                "dimensions": f"{metadata.width}x{metadata.height}",
+                "duration": f"{metadata.duration:.1f}s",
+                "rotation": metadata.rotation,
+                "title": metadata.title,
+                "caption": metadata.caption,
+                "creation_date": metadata.creation_date,
+                "gps": metadata.gps_coords,
+                "f_number": metadata.f_number,
+                "make": metadata.make,
+                "model": metadata.model,
+                "lens": metadata.lens,
+                "iso": metadata.iso,
+                "exposure_time": metadata.exposure_time,
+                "focal_length": metadata.focal_length,
+                "rating": metadata.rating,
+                "tags": metadata.tags,
+            },
+        )
         return metadata
     except (subprocess.CalledProcessError, KeyError, ValueError, IndexError, TypeError) as e:
         elapsed = time.time() - start_time
@@ -227,8 +228,7 @@ class VideoFrameExtractor:
         Logger for debugging and error messages.
     """
 
-    def __init__(self, video_path: str, display_width: int, display_height: int,
-                 fit_display: bool = False) -> None:
+    def __init__(self, video_path: str, display_width: int, display_height: int, fit_display: bool = False) -> None:
         """
         Initializes the VideoFrameExtractor.
 
@@ -306,14 +306,12 @@ class VideoFrameExtractor:
         width, height = frame.size
         if self.fit_display:
             if width != self.display_width or height != self.display_height:
-                frame = frame.resize((self.display_width, self.display_height),
-                                     resample=Image.Resampling.BICUBIC)
+                frame = frame.resize((self.display_width, self.display_height), resample=Image.Resampling.BICUBIC)
         elif width != self.display_width or height != self.display_height:
             frame = self._scale_frame(frame)
         return frame
 
-    def _get_frame_as_numpy(self, dimensions: Tuple[int, int],
-                            seek_time: float) -> Optional[np.ndarray]:
+    def _get_frame_as_numpy(self, dimensions: Tuple[int, int], seek_time: float) -> Optional[np.ndarray]:
         """
         Retrieve a frame from the video at a specific time.
 
@@ -333,18 +331,23 @@ class VideoFrameExtractor:
             # Build ffmpeg command
             cmd = [
                 "ffmpeg",
-                "-ss", str(seek_time) if seek_time else "0",  # seek time if specified
-                "-i", self.video_path,
-                "-vframes", "1",
-                "-f", "image2pipe",
-                "-pix_fmt", "rgb24",
-                "-vcodec", "rawvideo",
-                "-"
+                "-ss",
+                str(seek_time) if seek_time else "0",  # seek time if specified
+                "-i",
+                self.video_path,
+                "-vframes",
+                "1",
+                "-f",
+                "image2pipe",
+                "-pix_fmt",
+                "rgb24",
+                "-vcodec",
+                "rawvideo",
+                "-",
             ]
 
             # Run ffmpeg and capture output
-            process = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                     check=True)
+            process = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
 
             # Convert raw bytes to numpy array
             width, height = dimensions
@@ -411,7 +414,6 @@ class VideoFrameExtractor:
         sar = getattr(metadata, "sample_aspect_ratio", "1:1")
 
         if first_frame is not None and last_frame is not None:
-
             first_image = Image.fromarray(first_frame)
             last_image = Image.fromarray(last_frame)
             # Apply sample_aspect_ratio scaling if needed
@@ -468,10 +470,11 @@ class VideoStreamer:
     Communicates with video_player.py via stdin/stdout pipes.
     """
 
-    def __init__(self, x: int, y: int, w: int, h: int, video_path: Optional[str] = None,
-                 fit_display: bool = False) -> None:
+    def __init__(
+        self, x: int, y: int, w: int, h: int, video_path: Optional[str] = None, fit_display: bool = False
+    ) -> None:
         self.__logger = logging.getLogger(__name__)
-        self.__logger.debug("Initializing VideoStreamer")
+        self.__logger.debug_detailed("Initializing VideoStreamer")
 
         self._proc = None
         self._proc_stdin = None
@@ -492,8 +495,16 @@ class VideoStreamer:
         cmd = [
             sys.executable,
             os.path.join(os.path.dirname(__file__), "video_player.py"),
-            "--x", str(x), "--y", str(y), "--w", str(w), "--h", str(h),
-            "--log_level", log_level_str
+            "--x",
+            str(x),
+            "--y",
+            str(y),
+            "--w",
+            str(w),
+            "--h",
+            str(h),
+            "--log_level",
+            log_level_str,
         ]
         if fit_display:
             cmd.append("--fit_display")
@@ -503,7 +514,7 @@ class VideoStreamer:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             bufsize=1,
-            universal_newlines=True
+            universal_newlines=True,
         )
         self._proc_stdin = self._proc.stdin
         self._proc_stdout = self._proc.stdout
@@ -530,7 +541,7 @@ class VideoStreamer:
             True if the player process is running, False otherwise.
         """
         if self._proc is None or self._proc.poll() is not None:
-            self.__logger.debug("Player process is not alive.")
+            self.__logger.debug_detailed("Player process is not alive.")
             self._proc = None
             self._proc_stdin = None
             self._proc_stdout = None
@@ -561,7 +572,7 @@ class VideoStreamer:
         if not self._proc_stderr:
             return
         for line in self._proc_stderr:
-            self.__logger.debug("[player] %s", line.strip())
+            self.__logger.debug_detailed("[player] %s", line.strip())
 
     def play(self, video_path: Optional[str]) -> None:
         """
@@ -594,7 +605,7 @@ class VideoStreamer:
             self.kill()
             return
         elapsed = time.time() - start_time
-        self.__logger.info("Video player started in %.3f seconds.", elapsed)
+        self.__logger.debug("Video player started in %.3f seconds.", elapsed)
 
     def is_playing(self) -> bool:
         """
@@ -629,7 +640,7 @@ class VideoStreamer:
         while self.is_playing():
             if time.time() - start_time > timeout:
                 self.__logger.error("Timeout: Video did not stop within %d seconds. Kill player.", timeout)
-                self.__logger.debug("Killing player process due to timeout.")
+                self.__logger.debug_detailed("Killing player process due to timeout.")
                 self.kill()
                 break
             time.sleep(0.1)
@@ -638,7 +649,7 @@ class VideoStreamer:
         """
         Stops video playback and terminates the external player process.
         """
-        self.__logger.debug("Killing player process")
+        self.__logger.debug_detailed("Killing player process")
         if self._proc:
             self._proc.terminate()
             try:

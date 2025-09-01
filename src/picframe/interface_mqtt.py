@@ -15,12 +15,14 @@ Dependencies:
 - picframe.controller: For controlling the image display.
 """
 
-import logging
 import json
+import logging
 import os
 import ssl
-from typing import Optional, List
+from typing import List, Optional
+
 import paho.mqtt.client as mqtt
+
 from . import __version__
 from .controller import Controller
 
@@ -91,9 +93,7 @@ class InterfaceMQTT:
         Attempt to connect to the MQTT broker.
         """
         try:
-            self.__logger.info(
-                "Attempting to connect to MQTT broker at %s:%d", self.__broker, self.__port
-            )
+            self.__logger.debug("Attempting to connect to MQTT broker at %s:%d", self.__broker, self.__port)
             if self.__client is not None:
                 result = self.__client.connect(self.__broker, self.__port, keepalive=60)
                 self.__logger.debug("Connect result: %d", result)
@@ -190,12 +190,10 @@ class InterfaceMQTT:
                 reason_code_str = f"{reason_code} (value: {reason_code.value})"
             else:
                 reason_code_str = str(reason_code)
-            self.__logger.warning(
-                "Can't connect with MQTT broker. Reason = %s", reason_code_str
-            )
+            self.__logger.warning("Can't connect with MQTT broker. Reason = %s", reason_code_str)
             self.__connected = False
             return
-        self.__logger.info("Connected with MQTT broker")
+        self.__logger.debug("Connected with MQTT broker")
         self.__connected = True
 
         # send last will and testament
@@ -203,62 +201,92 @@ class InterfaceMQTT:
         client.publish(available_topic, "online", qos=0, retain=True)
 
         # sensors
-        self.__setup_text(client, "date_from", "mdi:calendar-arrow-left",
-                          available_topic, entity_category="config")
-        self.__setup_text(client, "date_to", "mdi:calendar-arrow-right",
-                          available_topic, entity_category="config")
-        self.__setup_text(client, "location_filter", "mdi:map-search",
-                          available_topic, entity_category="config")
-        self.__setup_text(client, "tags_filter", "mdi:image-search",
-                          available_topic, entity_category="config")
-        self.__setup_sensor(client, "image_counter", "mdi:camera-burst",
-                            available_topic, entity_category="diagnostic")
-        self.__setup_sensor(client, "image", "mdi:file-image",
-                            available_topic, has_attributes=True, entity_category="diagnostic")
+        self.__setup_text(client, "date_from", "mdi:calendar-arrow-left", available_topic, entity_category="config")
+        self.__setup_text(client, "date_to", "mdi:calendar-arrow-right", available_topic, entity_category="config")
+        self.__setup_text(client, "location_filter", "mdi:map-search", available_topic, entity_category="config")
+        self.__setup_text(client, "tags_filter", "mdi:image-search", available_topic, entity_category="config")
+        self.__setup_sensor(client, "image_counter", "mdi:camera-burst", available_topic, entity_category="diagnostic")
+        self.__setup_sensor(
+            client, "image", "mdi:file-image", available_topic, has_attributes=True, entity_category="diagnostic"
+        )
 
         # numbers
-        self.__setup_number(client, "brightness", 0.0, 1.0, 0.1, "mdi:brightness-6",
-                            available_topic)
-        self.__setup_number(client, "time_delay", 1, 400, 1, "mdi:image-plus",
-                            available_topic)
-        self.__setup_number(client, "fade_time", 1, 50, 1, "mdi:image-size-select-large",
-                            available_topic)
-        self.__setup_number(client, "matting_images", 0.0, 1.0, 0.01, "mdi:image-frame",
-                            available_topic)
+        self.__setup_number(client, "brightness", 0.0, 1.0, 0.1, "mdi:brightness-6", available_topic)
+        self.__setup_number(client, "time_delay", 1, 400, 1, "mdi:image-plus", available_topic)
+        self.__setup_number(client, "fade_time", 1, 50, 1, "mdi:image-size-select-large", available_topic)
+        self.__setup_number(client, "matting_images", 0.0, 1.0, 0.01, "mdi:image-frame", available_topic)
 
         # selects
         _, dir_list = self.__controller.get_directory_list()
         dir_list.sort()
-        self.__setup_select(client, "directory", dir_list, "mdi:folder-multiple-image",
-                            available_topic, init=True)
+        self.__setup_select(client, "directory", dir_list, "mdi:folder-multiple-image", available_topic, init=True)
         command_topic = self.__device_id + "/directory"
         client.subscribe(command_topic, qos=0)
 
         # switches
-        self.__setup_switch(client, "text_refresh", "mdi:refresh",
-                            available_topic, entity_category="config")
-        self.__setup_switch(client, "name_toggle", "mdi:subtitles", available_topic,
-                            self.__controller.text_is_on("name"), entity_category="config")
-        self.__setup_switch(client, "title_toggle", "mdi:subtitles", available_topic,
-                            self.__controller.text_is_on("title"), entity_category="config")
-        self.__setup_switch(client, "caption_toggle", "mdi:subtitles", available_topic,
-                            self.__controller.text_is_on("caption"), entity_category="config")
-        self.__setup_switch(client, "date_toggle", "mdi:calendar-today", available_topic,
-                            self.__controller.text_is_on("date"), entity_category="config")
-        self.__setup_switch(client, "location_toggle", "mdi:crosshairs-gps", available_topic,
-                            self.__controller.text_is_on("location"), entity_category="config")
-        self.__setup_switch(client, "directory_toggle", "mdi:folder", available_topic,
-                            self.__controller.text_is_on("directory"), entity_category="config")
-        self.__setup_switch(client, "text_off", "mdi:badge-account-horizontal-outline",
-                            available_topic, entity_category="config")
-        self.__setup_switch(client, "display", "mdi:panorama", available_topic,
-                            self.__controller.display_is_on)
-        self.__setup_switch(client, "clock", "mdi:clock-outline", available_topic,
-                            self.__controller.clock_is_on, entity_category="config")
-        self.__setup_switch(client, "shuffle", "mdi:shuffle-variant", available_topic,
-                            self.__controller.shuffle)
-        self.__setup_switch(client, "paused", "mdi:pause", available_topic,
-                            self.__controller.paused)
+        self.__setup_switch(client, "text_refresh", "mdi:refresh", available_topic, entity_category="config")
+        self.__setup_switch(
+            client,
+            "name_toggle",
+            "mdi:subtitles",
+            available_topic,
+            self.__controller.text_is_on("name"),
+            entity_category="config",
+        )
+        self.__setup_switch(
+            client,
+            "title_toggle",
+            "mdi:subtitles",
+            available_topic,
+            self.__controller.text_is_on("title"),
+            entity_category="config",
+        )
+        self.__setup_switch(
+            client,
+            "caption_toggle",
+            "mdi:subtitles",
+            available_topic,
+            self.__controller.text_is_on("caption"),
+            entity_category="config",
+        )
+        self.__setup_switch(
+            client,
+            "date_toggle",
+            "mdi:calendar-today",
+            available_topic,
+            self.__controller.text_is_on("date"),
+            entity_category="config",
+        )
+        self.__setup_switch(
+            client,
+            "location_toggle",
+            "mdi:crosshairs-gps",
+            available_topic,
+            self.__controller.text_is_on("location"),
+            entity_category="config",
+        )
+        self.__setup_switch(
+            client,
+            "directory_toggle",
+            "mdi:folder",
+            available_topic,
+            self.__controller.text_is_on("directory"),
+            entity_category="config",
+        )
+        self.__setup_switch(
+            client, "text_off", "mdi:badge-account-horizontal-outline", available_topic, entity_category="config"
+        )
+        self.__setup_switch(client, "display", "mdi:panorama", available_topic, self.__controller.display_is_on)
+        self.__setup_switch(
+            client,
+            "clock",
+            "mdi:clock-outline",
+            available_topic,
+            self.__controller.clock_is_on,
+            entity_category="config",
+        )
+        self.__setup_switch(client, "shuffle", "mdi:shuffle-variant", available_topic, self.__controller.shuffle)
+        self.__setup_switch(client, "paused", "mdi:pause", available_topic, self.__controller.paused)
 
         # buttons
         self.__setup_button(client, "delete", "mdi:delete", available_topic)
@@ -288,7 +316,7 @@ class InterfaceMQTT:
             "name": self.__device_id,
             "mdl": "PictureFrame",
             "sw": __version__,
-            "mf": "pi3d PictureFrame project"
+            "mf": "pi3d PictureFrame project",
         }
         if self.__device_url:
             dev["cu"] = self.__device_url
@@ -301,7 +329,7 @@ class InterfaceMQTT:
         icon: str,
         available_topic: str,
         has_attributes: bool = False,
-        entity_category: Optional[str] = None
+        entity_category: Optional[str] = None,
     ) -> None:
         """
         Set up a sensor in Home Assistant.
@@ -326,7 +354,7 @@ class InterfaceMQTT:
             "value_template": "{{ value_json." + topic + "}}",
             "avty_t": available_topic,
             "uniq_id": name,
-            "dev": self.__get_dev_element()
+            "dev": self.__get_dev_element(),
         }
         if has_attributes is True:
             config_dict["state_topic"] = sensor_topic_head + "_" + topic + "/state"
@@ -341,12 +369,7 @@ class InterfaceMQTT:
         client.subscribe(self.__device_id + "/" + topic, qos=0)
 
     def __setup_text(
-        self,
-        client: mqtt.Client,
-        topic: str,
-        icon: str,
-        available_topic: str,
-        entity_category: Optional[str] = None
+        self, client: mqtt.Client, topic: str, icon: str, available_topic: str, entity_category: Optional[str] = None
     ) -> None:
         """
         Sets up the text sensor configuration and publishes it to the MQTT broker.
@@ -372,7 +395,7 @@ class InterfaceMQTT:
             "command_topic": text_topic_head + "_" + topic + "/cmd",
             "avty_t": available_topic,
             "uniq_id": name,
-            "dev": self.__get_dev_element()
+            "dev": self.__get_dev_element(),
         }
         if entity_category:
             config_dict["entity_category"] = entity_category
@@ -389,7 +412,7 @@ class InterfaceMQTT:
         max_value: float,
         step: float,
         icon: str,
-        available_topic: str
+        available_topic: str,
     ) -> None:
         """
         Set up a number entity in Home Assistant.
@@ -411,29 +434,27 @@ class InterfaceMQTT:
         command_topic = self.__device_id + "/" + topic
         state_topic = "homeassistant/sensor/" + self.__device_id + "/state"
         name = self.__device_id + "_" + topic
-        config_payload = json.dumps({"name": topic,
-                                     "min": min_value,
-                                     "max": max_value,
-                                     "step": step,
-                                     "icon": icon,
-                                     "entity_category": "config",
-                                     "state_topic": state_topic,
-                                     "command_topic": command_topic,
-                                     "value_template": "{{ value_json." + topic + "}}",
-                                     "avty_t": available_topic,
-                                     "uniq_id": name,
-                                    "dev": self.__get_dev_element()})
+        config_payload = json.dumps(
+            {
+                "name": topic,
+                "min": min_value,
+                "max": max_value,
+                "step": step,
+                "icon": icon,
+                "entity_category": "config",
+                "state_topic": state_topic,
+                "command_topic": command_topic,
+                "value_template": "{{ value_json." + topic + "}}",
+                "avty_t": available_topic,
+                "uniq_id": name,
+                "dev": self.__get_dev_element(),
+            }
+        )
         client.publish(config_topic, config_payload, qos=0, retain=True)
         client.subscribe(command_topic, qos=0)
 
     def __setup_select(
-        self,
-        client: mqtt.Client,
-        topic: str,
-        options: List[str],
-        icon: str,
-        available_topic: str,
-        init: bool = False
+        self, client: mqtt.Client, topic: str, options: List[str], icon: str, available_topic: str, init: bool = False
     ) -> None:
         """
         Set up a select component in Home Assistant.
@@ -453,16 +474,20 @@ class InterfaceMQTT:
         state_topic = "homeassistant/sensor/" + self.__device_id + "/state"
         name = self.__device_id + "_" + topic
 
-        config_payload = json.dumps({"name": topic,
-                                     "entity_category": "config",
-                                     "icon": icon,
-                                     "options": options,
-                                     "state_topic": state_topic,
-                                     "command_topic": command_topic,
-                                     "value_template": "{{ value_json." + topic + "}}",
-                                     "avty_t": available_topic,
-                                     "uniq_id": name,
-                                     "dev": self.__get_dev_element()})
+        config_payload = json.dumps(
+            {
+                "name": topic,
+                "entity_category": "config",
+                "icon": icon,
+                "options": options,
+                "state_topic": state_topic,
+                "command_topic": command_topic,
+                "value_template": "{{ value_json." + topic + "}}",
+                "avty_t": available_topic,
+                "uniq_id": name,
+                "dev": self.__get_dev_element(),
+            }
+        )
         client.publish(config_topic, config_payload, qos=0, retain=True)
         if init:
             client.subscribe(command_topic, qos=0)
@@ -474,7 +499,7 @@ class InterfaceMQTT:
         icon: str,
         available_topic: str,
         is_on: bool = False,
-        entity_category: Optional[str] = None
+        entity_category: Optional[str] = None,
     ) -> None:
         """
         Sets up a switch in Home Assistant.
@@ -498,7 +523,7 @@ class InterfaceMQTT:
             "state_topic": state_topic,
             "avty_t": available_topic,
             "uniq_id": self.__device_id + "_" + topic,
-            "dev": self.__get_dev_element()
+            "dev": self.__get_dev_element(),
         }
         if entity_category:
             config_dict["entity_category"] = entity_category
@@ -508,8 +533,9 @@ class InterfaceMQTT:
         client.publish(config_topic, config_payload, qos=0, retain=True)
         client.publish(state_topic, "ON" if is_on else "OFF", qos=0, retain=True)
 
-    def __setup_button(self, client: mqtt.Client, topic: str, icon: str,
-                       available_topic: str, entity_category: Optional[str] = None) -> None:
+    def __setup_button(
+        self, client: mqtt.Client, topic: str, icon: str, available_topic: str, entity_category: Optional[str] = None
+    ) -> None:
         """
         Set up a button configuration for the Home Assistant integration.
 
@@ -533,7 +559,7 @@ class InterfaceMQTT:
             "payload_press": "ON",
             "avty_t": available_topic,
             "uniq_id": self.__device_id + "_" + topic,
-            "dev": self.__get_dev_element()
+            "dev": self.__get_dev_element(),
         }
         if entity_category:
             config_dict["entity_category"] = entity_category
@@ -542,12 +568,7 @@ class InterfaceMQTT:
         client.subscribe(command_topic, qos=0)
         client.publish(config_topic, config_payload, qos=0, retain=True)
 
-    def __on_message(
-        self,
-        client: mqtt.Client,
-        _userdata: object,
-        message: mqtt.MQTTMessage
-    ) -> None:
+    def __on_message(self, client: mqtt.Client, _userdata: object, message: mqtt.MQTTMessage) -> None:
         """
         Callback function that is called when a message is received.
 
@@ -679,39 +700,39 @@ class InterfaceMQTT:
         # #### values ########
         # change subdirectory
         elif message.topic == self.__device_id + "/directory":
-            self.__logger.info("Recieved subdirectory: %s", msg)
+            self.__logger.debug("Recieved subdirectory: %s", msg)
             self.__controller.subdirectory = msg
         # date_from
         elif message.topic == self.__device_id + "/date_from":
-            self.__logger.info("Recieved date_from: %s", msg)
+            self.__logger.debug("Recieved date_from: %s", msg)
             self.__controller.date_from = msg
         # date_to
         elif message.topic == self.__device_id + "/date_to":
-            self.__logger.info("Recieved date_to: %s", msg)
+            self.__logger.debug("Recieved date_to: %s", msg)
             self.__controller.date_to = msg
         # fade_time
         elif message.topic == self.__device_id + "/fade_time":
-            self.__logger.info("Recieved fade_time: %s", msg)
+            self.__logger.debug("Recieved fade_time: %s", msg)
             self.__controller.fade_time = float(msg)
         # time_delay
         elif message.topic == self.__device_id + "/time_delay":
-            self.__logger.info("Recieved time_delay: %s", msg)
+            self.__logger.debug("Recieved time_delay: %s", msg)
             self.__controller.time_delay = float(msg)
         # brightness
         elif message.topic == self.__device_id + "/brightness":
-            self.__logger.info("Recieved brightness: %s", msg)
+            self.__logger.debug("Recieved brightness: %s", msg)
             self.__controller.brightness = float(msg)
         # matting_images
         elif message.topic == self.__device_id + "/matting_images":
-            self.__logger.info("Received matting_images: %s", msg)
+            self.__logger.debug("Received matting_images: %s", msg)
             self.__controller.matting_images = float(msg)
         # location filter
         elif message.topic == self.__device_id + "/location_filter":
-            self.__logger.info("Recieved location filter: %s", msg)
+            self.__logger.debug("Recieved location filter: %s", msg)
             self.__controller.location_filter = msg
         # tags filter
         elif message.topic == self.__device_id + "/tags_filter":
-            self.__logger.info("Recieved tags filter: %s", msg)
+            self.__logger.debug("Recieved tags filter: %s", msg)
             self.__controller.tags_filter = msg
 
         # set the flag to purge files from database
@@ -763,9 +784,8 @@ class InterfaceMQTT:
             _, tail = os.path.split(image)
             image_state_payload["image"] = tail
             image_state_topic = sensor_topic_head + "_image/state"
-            self.__logger.info("Send image state: %s", image_state_payload)
-            self.__client.publish(image_state_topic, json.dumps(image_state_payload),
-                                  qos=0, retain=False)
+            self.__logger.debug("Send image state: %s", image_state_payload)
+            self.__client.publish(image_state_topic, json.dumps(image_state_payload), qos=0, retain=False)
 
         # sensor
         # directory sensor
@@ -793,13 +813,13 @@ class InterfaceMQTT:
 
         # publish sensors
         dir_list.sort()
-        self.__setup_select(self.__client, "directory", dir_list,
-                            "mdi:folder-multiple-image", available_topic, init=False)
+        self.__setup_select(
+            self.__client, "directory", dir_list, "mdi:folder-multiple-image", available_topic, init=False
+        )
 
-        self.__logger.info("Send sensor state: %s", sensor_state_payload)
+        self.__logger.debug("Send sensor state: %s", sensor_state_payload)
         sensor_state_topic = sensor_topic_head + "/state"
-        self.__client.publish(sensor_state_topic, json.dumps(sensor_state_payload),
-                              qos=0, retain=False)
+        self.__client.publish(sensor_state_topic, json.dumps(sensor_state_payload), qos=0, retain=False)
 
         # publish state of switches
         # pause
