@@ -41,7 +41,7 @@ class ImageCache:
         model=None,
     ):
         self.__logger = logging.getLogger(__name__)
-        self.__logger.debug("Creating an instance of ImageCache")
+        self.__logger.debug_detailed("Creating an instance of ImageCache")
 
         self.__picture_dir = picture_dir
         self.__follow_links = follow_links
@@ -79,7 +79,7 @@ class ImageCache:
         if not self.__schema_exists_and_valid():
             self.__logger.debug("Creating schema")
             schema.create_schema(self.__db)
-            self.__logger.debug("Updating cache (add files on disk to DB)")
+            self.__logger.debug_detailed("Updating cache (add files on disk to DB)")
             self.update_cache()
 
         # Log file time capabilities
@@ -189,9 +189,9 @@ class ImageCache:
         # Prevent re-entrancy if called concurrently (e.g., by a timer)
         self.__logger.debug("CREATE_NEW_SLIDESHOW called **************************")
         if getattr(self, "_creating_new_slideshow", False):
-            self.__logger.debug("CREATING NEW SLIDESHOW ATTR NOT FOUND")
+            self.__logger.debug_detailed("CREATING NEW SLIDESHOW ATTR NOT FOUND")
         elif self._creating_new_slideshow:
-            self.__logger.debug("Slideshow creation already in progress; skipping new request.")
+            self.__logger.debug_detailed("Slideshow creation already in progress; skipping new request.")
             return
         self._creating_new_slideshow = True
         try:
@@ -202,10 +202,10 @@ class ImageCache:
             if self.__model is None:
                 self.__logger.warning("Model reference not set on ImageCache; cannot create slideshow")
                 return None
-            self.__logger.debug("Calling NewSlideshow(model).generate_slideshow()...")
+            self.__logger.debug_detailed("Calling NewSlideshow(model).generate_slideshow()...")
             ns = NewSlideshow(self.__model)
             ns.generate_slideshow()
-            self.__logger.info("New slideshow creation completed")
+            self.__logger.debug_detailed("New slideshow creation completed")
         except Exception as e:
             self.__logger.warning(f"Error creating new slideshow: {e}")
         finally:
@@ -227,10 +227,10 @@ class ImageCache:
         self.__purge_files = True
 
     def update_cache(self):
-        self.__logger.debug("Updating cache")
+        self.__logger.debug_detailed("Updating cache")
 
         if not self.__modified_files:
-            self.__logger.debug("No unprocessed files in memory, checking disk")
+            self.__logger.debug_detailed("No unprocessed files in memory, checking disk")
             self.__modified_folders = self.__get_modified_folders()
             self.__logger.debug(f"Modified folders: {self.__modified_folders}")
             self.__modified_files = self.__get_modified_files(self.__modified_folders)
@@ -285,7 +285,7 @@ class ImageCache:
                 with self.__db:  # auto-commit
                     self.__db.execute(sql, (lat, lon, location))
                 now = round(time.time() * 1000)
-                self.__logger.debug("Update location: took %d ms for update", now - starttime)
+                self.__logger.debug_verbose("Update location: took %d ms for update", now - starttime)
                 return True
             except Exception as e:
                 self.__logger.warning(f"Error updating location: {e}")
@@ -603,7 +603,9 @@ class ImageCache:
                 # Fall back to modification time if birth time unavailable
                 mod_time = os.path.getmtime(filepath)
                 fallback_time = datetime.fromtimestamp(mod_time)
-                self.__logger.debug(f"Birth time unavailable for {filepath}, using modification time: {fallback_time}")
+                self.__logger.debug_detailed(
+                    f"Birth time unavailable for {filepath}, using modification time: {fallback_time}"
+                )
                 return fallback_time
 
         except FileNotFoundError:
@@ -662,12 +664,14 @@ class ImageCache:
         Log information about file time capabilities of the current system.
         """
         birth_supported = self.is_birth_time_supported()
-        self.__logger.debug(f"File birth time support: {'Available' if birth_supported else 'Not available'}")
+        self.__logger.debug_verbose(f"File birth time support: {'Available' if birth_supported else 'Not available'}")
 
         if birth_supported:
-            self.__logger.debug("System supports file creation time retrieval")
+            self.__logger.debug_detailed("System supports file creation time retrieval")
         else:
-            self.__logger.debug("System does not support file creation time, will use modification time as fallback")
+            self.__logger.debug_detailed(
+                "System does not support file creation time, will use modification time as fallback"
+            )
 
 
 # If being executed (instead of imported), kick it off...

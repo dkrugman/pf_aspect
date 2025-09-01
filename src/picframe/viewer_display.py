@@ -37,7 +37,7 @@ def parse_show_text(txt):
 class ViewerDisplay:
     def __init__(self, config):
         self.__logger = logging.getLogger(__name__)
-        self.__logger.debug("ViewerDisplay starting")
+        self.__logger.debug_detailed("ViewerDisplay starting")
         self.__blur_amount = config["blur_amount"]
         self.__blur_zoom = config["blur_zoom"]
         self.__blur_edges = config["blur_edges"]
@@ -75,6 +75,9 @@ class ViewerDisplay:
             self.__blur_edges = False
         if self.__blur_zoom < 1.0:
             self.__blur_zoom = 1.0
+
+        # Get resampling kernel from aspect config if available
+        self.__resampling_kernel = getattr(config, "resampling_kernel", "LANCZOS")
         self.__display_x = int(config["display_x"])
         self.__display_y = int(config["display_y"])
         self.__display_w = None if config["display_w"] is None else int(config["display_w"])
@@ -115,6 +118,18 @@ class ViewerDisplay:
         self.__stopping = False  # flag to indicate slideshow should stop
         ImageFile.LOAD_TRUNCATED_IMAGES = True  # occasional damaged file hangs app
 
+    def _get_pil_resampling(self):
+        """Convert resampling kernel string to PIL resampling constant."""
+        resampling_map = {
+            "NEAREST": Image.Resampling.NEAREST,
+            "BILINEAR": Image.Resampling.BILINEAR,
+            "BICUBIC": Image.Resampling.BICUBIC,
+            "LANCZOS": Image.Resampling.LANCZOS,
+            "BOX": Image.Resampling.BOX,
+            "HAMMING": Image.Resampling.HAMMING,
+        }
+        return resampling_map.get(self.__resampling_kernel.upper(), Image.Resampling.LANCZOS)
+
     @property
     def display_is_on(self):
         if self.__display_power == 0:
@@ -125,8 +140,8 @@ class ViewerDisplay:
                 else:
                     return False
             except (FileNotFoundError, ValueError, OSError) as e:
-                self.__logger.debug("Display ON/OFF is vcgencmd, but an error occurred")
-                self.__logger.debug("Cause: %s", e)
+                self.__logger.debug_detailed("Display ON/OFF is vcgencmd, but an error occurred")
+                self.__logger.debug_detailed("Cause: %s", e)
             return True
         elif self.__display_power == 1:
             try:  # try xset on linux, DPMS has to be enabled
@@ -136,8 +151,8 @@ class ViewerDisplay:
                 else:
                     return False
             except (subprocess.SubprocessError, FileNotFoundError, ValueError, OSError) as e:
-                self.__logger.debug("Display ON/OFF is X with dpms enabled, but an error occurred")
-                self.__logger.debug("Cause: %s", e)
+                self.__logger.debug_detailed("Display ON/OFF is X with dpms enabled, but an error occurred")
+                self.__logger.debug_detailed("Cause: %s", e)
             return True
         elif self.__display_power == 2:
             try:
@@ -147,8 +162,8 @@ class ViewerDisplay:
                 else:
                     return False
             except (subprocess.SubprocessError, FileNotFoundError, ValueError, OSError) as e:
-                self.__logger.debug("Display ON/OFF is wlr-randr, but an error occurred")
-                self.__logger.debug("Cause: %s", e)
+                self.__logger.debug_detailed("Display ON/OFF is wlr-randr, but an error occurred")
+                self.__logger.debug_detailed("Cause: %s", e)
             return True
         else:
             self.__logger.warning("Unsupported setting for display_power=%d.", self.__display_power)
@@ -156,7 +171,7 @@ class ViewerDisplay:
 
     @display_is_on.setter
     def display_is_on(self, on_off):
-        self.__logger.debug("Switch display (display_power=%d).", self.__display_power)
+        self.__logger.debug_detailed("Switch display (display_power=%d).", self.__display_power)
         if self.__display_power == 0:
             try:  # vcgencmd only applies to raspberry pi
                 if on_off is True:
@@ -164,8 +179,8 @@ class ViewerDisplay:
                 else:
                     subprocess.call(["vcgencmd", "display_power", "0"])
             except (subprocess.SubprocessError, FileNotFoundError, ValueError, OSError) as e:
-                self.__logger.debug("Display ON/OFF is vcgencmd, but an error occured")
-                self.__logger.debug("Cause: %s", e)
+                self.__logger.debug_detailed("Display ON/OFF is vcgencmd, but an error occured")
+                self.__logger.debug_detailed("Cause: %s", e)
         elif self.__display_power == 1:
             try:  # try xset on linux, DPMS has to be enabled
                 if on_off is True:
@@ -173,16 +188,16 @@ class ViewerDisplay:
                 else:
                     subprocess.call(["xset", "-display", ":0", "dpms", "force", "off"])
             except (ValueError, TypeError) as e:
-                self.__logger.debug("Display ON/OFF is xset via dpms, but an error occured")
-                self.__logger.debug("Cause: %s", e)
+                self.__logger.debug_detailed("Display ON/OFF is xset via dpms, but an error occured")
+                self.__logger.debug_detailed("Cause: %s", e)
         elif self.__display_power == 2:
             try:  # try wlr-randr for RPi5 with wayland desktop
                 wlr_randr_cmd = ["wlr-randr", "--output", "HDMI-A-1"]
                 wlr_randr_cmd.append("--on" if on_off else "--off")
                 subprocess.call(wlr_randr_cmd)
             except (ValueError, TypeError) as e:
-                self.__logger.debug("Display ON/OFF is wlr-randr, but an error occured")
-                self.__logger.debug("Cause: %s", e)
+                self.__logger.debug_detailed("Display ON/OFF is wlr-randr, but an error occured")
+                self.__logger.debug_detailed("Cause: %s", e)
         else:
             self.__logger.warning("Unsupported setting for display_power=%d.", self.__display_power)
 
@@ -205,7 +220,7 @@ class ViewerDisplay:
         if pic is not None and paused is not None:  # text needs to be refreshed
             self.__make_text(pic, paused)
         self.__name_tm = max(self.__name_tm, time.time() + self.__show_text_tm)
-        # self.__logger.debug(f"PIC: {pic} PAUSED: {paused} NAME_TM: {self.__name_tm} "
+        # self.__logger.debug_detailed(f"PIC: {pic} PAUSED: {paused} NAME_TM: {self.__name_tm} "
         #                    f"SHOW_TEXT_TM: {self.__show_text_tm}")
 
     def set_brightness(self, val):
@@ -254,7 +269,7 @@ class ViewerDisplay:
         if pic.is_portrait and not (
             ext in (".heif", ".heic")
         ):  # heif and heic images are converted to PIL.Image objects and are always in correct orientation
-            # self.__logger.debug(f"TURN TURN TURN TURN TURN TURN TURN TURN TURN TURN TURN TURN {pic.fname}")
+            # self.__logger.debug_detailed(f"TURN TURN TURN TURN TURN TURN TURN TURN TURN TURN TURN TURN {pic.fname}")
             try:
                 im = ImageOps.exif_transpose(im).rotate(90, resample=False, expand=True)
             except Exception as e:
@@ -284,18 +299,18 @@ class ViewerDisplay:
             diff_aspect = 1 - (image_aspect / screen_aspect)
         else:
             diff_aspect = 1 - (screen_aspect / image_aspect)
-        # self.__logger.debug(f"screen_aspect: {screen_aspect}, image_aspect: {image_aspect}, "
+        # self.__logger.debug_detailed(f"screen_aspect: {screen_aspect}, image_aspect: {image_aspect}, "
         #                    f"diff_aspect: {diff_aspect}")
         return (screen_aspect, image_aspect, diff_aspect)
 
     def __tex_load(self, pic, size=None):  # noqa: C901
         # Check if slideshow should stop before loading image
         if self.__stopping:
-            self.__logger.info("Image loading cancelled - stopping in progress")
+            self.__logger.debug("Image loading cancelled - stopping in progress")
             return None
 
         try:
-            # self.__logger.debug(f"loading image: {pic.fname}")
+            # self.__logger.debug_detailed(f"loading image: {pic.fname}")
             if self.__mat_images and self.__matter is None:
                 self.__matter = mat_image.MatImage(
                     display_size=(self.__display.width, self.__display.height),
@@ -307,6 +322,7 @@ class ViewerDisplay:
                     inner_mat_border=self.__inner_mat_border,
                     outer_mat_use_texture=self.__outer_mat_use_texture,
                     inner_mat_use_texture=self.__inner_mat_use_texture,
+                    resampling_kernel=self.__resampling_kernel,
                 )
 
             # Load the image(s) and correct their orientation as necessary
@@ -314,13 +330,13 @@ class ViewerDisplay:
                 im = get_image_meta.GetImageMeta.get_image_object(pic.fname)
                 if im is None:
                     return None
-                # self.__logger.debug(f"im: {im.size}")
+                # self.__logger.debug_detailed(f"im: {im.size}")
                 im = self.__orientate_image(im, pic)
 
             screen_aspect, image_aspect, diff_aspect = self.__get_aspect_diff(size, im.size)
 
             if self.__mat_images and diff_aspect > self.__mat_images_tol:
-                im = self.__matter.mat_image(im)
+                im = self.__matter.mat_image([im])  # Pass as a list since mat_image expects a list of images
 
             (w, h) = im.size
             screen_aspect, image_aspect, diff_aspect = self.__get_aspect_diff(size, im.size)
@@ -336,9 +352,9 @@ class ViewerDisplay:
                     blr_sz = [int(x * 512 / size[0]) for x in size]
                     im_b = im.resize(size, resample=0, box=box).resize(blr_sz)
                     im_b = im_b.filter(ImageFilter.GaussianBlur(self.__blur_amount))
-                    im_b = im_b.resize(size, resample=Image.BICUBIC)
+                    im_b = im_b.resize(size, resample=self._get_pil_resampling())
                     im_b.putalpha(round(255 * self.__edge_alpha))  # to apply the same EDGE_ALPHA as the no blur method.
-                    im = im.resize([int(x * sc_f) for x in im.size], resample=Image.BICUBIC)
+                    im = im.resize([int(x * sc_f) for x in im.size], resample=self._get_pil_resampling())
                     """resize can use Image.LANCZOS (alias for Image.ANTIALIAS) for resampling
                     for better rendering of high-contranst diagonal lines. NB downscaled large
                     images are rescaled near the start of this try block if w or h > max_dimension
@@ -352,7 +368,7 @@ class ViewerDisplay:
         except Exception as e:
             self.__logger.warning("Can't create tex from file: %s", pic.fname)
             self.__logger.warning("Cause: %s", e)
-            self.__logger.debug(f"im: {im.size}")
+            self.__logger.debug_detailed(f"im: {im.size}")
             tex = None
             # raise # only re-raise errors here while debugging
         return tex
@@ -542,11 +558,11 @@ class ViewerDisplay:
         """
         # Check if slideshow should stop before loading video frames
         if self.__stopping:
-            self.__logger.info("Video frame loading cancelled - stopping in progress")
+            self.__logger.debug("Video frame loading cancelled - stopping in progress")
             return None
 
         try:
-            self.__logger.debug("Loading video frames: %s", video_path)
+            self.__logger.debug_detailed("Loading video frames: %s", video_path)
             extractor = VideoFrameExtractor(
                 video_path, self.__display.width, self.__display.height, fit_display=self.__video_fit_display
             )
@@ -603,7 +619,7 @@ class ViewerDisplay:
         """
         # Check if slideshow should stop
         if self.__stopping:
-            self.__logger.info("Slideshow transition cancelled - stopping in progress")
+            self.__logger.debug("Slideshow transition cancelled - stopping in progress")
             return (False, True, False)
 
         loop_running = False
@@ -619,7 +635,7 @@ class ViewerDisplay:
         while time.time() < end_time + 0.5:
             # Check if slideshow should stop during the loop
             if self.__stopping:
-                self.__logger.info("Slideshow loop cancelled - stopping in progress")
+                self.__logger.debug("Slideshow loop cancelled - stopping in progress")
                 return (False, True, False)
 
             video_playing = False
@@ -704,7 +720,7 @@ class ViewerDisplay:
                 if self.__video_path is not None and tm > self.__name_tm:
                     # Check if slideshow should stop before starting video
                     if self.__stopping:
-                        self.__logger.info("Video start cancelled - stopping in progress")
+                        self.__logger.debug("Video start cancelled - stopping in progress")
                         self.__video_path = None
                     else:
                         # start video stream
@@ -796,10 +812,10 @@ class ViewerDisplay:
             self.__video_streamer.pause(do_pause)
 
     def slideshow_stop(self):
-        self.__logger.info("Stopping slideshow...")
+        self.__logger.debug("Stopping slideshow...")
         self.__stopping = True
         if self.__video_streamer is not None:
             self.__video_streamer.kill()
         if self.__display is not None:
             self.__display.destroy()
-        self.__logger.info("Slideshow stopped")
+        self.__logger.debug("Slideshow stopped")

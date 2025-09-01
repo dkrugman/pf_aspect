@@ -94,9 +94,9 @@ def picframe_signal_handler(signum, controller_ref):
         controller_ref[0].keep_looping = False
 
         try:
-            logger.info("Calling controller.stop() from signal handler...")
+            logger.debug("Calling controller.stop() from signal handler...")
             controller_ref[0].stop()
-            logger.info("Controller stop() completed from signal handler")
+            logger.debug("Controller stop() completed from signal handler")
             # Mark that stop has been called to prevent duplicate calls
             controller_ref[0]._stop_called = True
 
@@ -119,7 +119,7 @@ async def run_picframe_app(args=None):
         stream=sys.stdout, level=logging.INFO, format="%(asctime)s %(levelname)s [%(filename)s:%(lineno)d] %(message)s"
     )
     logger = logging.getLogger(__name__)
-    logger.info("starting %s", sys.argv)
+    logger.debug("starting %s", sys.argv)
 
     # === Suppress logs from external libraries ===
     for noisy_logger in ["pyvips", "urllib3", "PIL", "chardet", "requests", "exifread", "pi3d", "pi3lib", "iptcinfo"]:
@@ -155,7 +155,7 @@ async def run_picframe_app(args=None):
         except Exception as e:
             print("Can't copy files to: ", args.initialize, ". Reason: ", e)
         return
-    elif args.version:
+    if args.version:
         print("picframe version: ", __version__)
         print("\nChecking required packages......")  # TODO update list of packages
         required_packages = [
@@ -192,10 +192,10 @@ async def run_picframe_app(args=None):
         while c.keep_looping:
             await asyncio.sleep(1)
     except asyncio.CancelledError:
-        logger.info("Main loop Cancelled")
+        logger.debug_detailed("Main loop Cancelled")
         raise
     except KeyboardInterrupt:
-        logger.info("Main loop interrupted by KeyboardInterrupt")
+        logger.debug_detailed("Main loop interrupted by KeyboardInterrupt")
         raise
     except Exception as e:
         logger.error(f"Unexpected error in main loop: {e}")
@@ -206,7 +206,7 @@ async def run_picframe_app(args=None):
             if asyncio.iscoroutine(maybe):
                 await maybe
         else:
-            logger.info("Controller already stopped by signal handler, skipping duplicate stop call")
+            logger.debug_detailed("Controller already stopped by signal handler, skipping duplicate stop call")
 
 
 async def main():

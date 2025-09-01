@@ -22,7 +22,7 @@ class InterfacePeripherals:
     """
 
     def __init__(self, model, viewer, controller) -> None:
-        logger.info("creating an instance of InterfacePeripherals")
+        logger.debug_detailed("Creating an instance of InterfacePeripherals")
 
         self.__model = model
         self.__viewer = viewer
@@ -30,7 +30,7 @@ class InterfacePeripherals:
 
         self.__input_type = self.__model.get_peripherals_config()["input_type"]
         if not self.__input_type:
-            logger.info("peripheral input is disabled")
+            logger.debug("peripheral input is disabled")
             return
         valid_input_types = {"keyboard", "touch", "mouse"}
         if self.__input_type not in valid_input_types:
@@ -319,15 +319,15 @@ class InterfacePeripherals:
         return False
 
     def __handle_click(self) -> None:
-        logger.debug("handling click at position x: %s, y: %s", *self.__pointer_position)
+        logger.debug_detailed("handling click at position x: %s, y: %s", *self.__pointer_position)
         self.__gui.check(*self.__pointer_position)
 
     def __go_back(self, position) -> None:
-        logger.info("navigation: previous picture")
+        logger.debug("navigation: previous picture")
         self.controller.back()
 
     def __go_next(self, position) -> None:
-        logger.info("navigation: next picture")
+        logger.debug("navigation: next picture")
         self.controller.next()
 
 
@@ -350,7 +350,7 @@ class IPMenuItem(pi3d.MenuItem):
         """
         Logs each action.
         """
-        logger.info("invoked menu item: %s", self.config_name)
+        logger.debug("invoked menu item: %s", self.config_name)
         self.action()
 
     def action(self) -> None:

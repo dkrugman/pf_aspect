@@ -33,6 +33,9 @@ class NewSlideshow:
         self.target_set_size = aspect_conf.get("target_set_size", 10)
         self.min_set_size = aspect_conf.get("min_set_size", 3)
         self.shuffle = model.get_model_config().get("shuffle", True)
+        self.square_img = aspect_conf.get(
+            "square_img", "Landscape"
+        )  # How to treat square images: "Landscape" or "Portrait"
 
         if not self.api_key:
             raise ValueError("API Key is required for Random.org integration.")
@@ -49,7 +52,11 @@ class NewSlideshow:
                 if not data:
                     self.__logger.warning("No files available for slideshow")
                     return None
+                if len(data) < self.min_set_size:
+                    return None
+                    self.__logger.warning("Not enough files available to shuffle")
                 return data
+
         except Exception as e:
             self.__logger.warning(f"Error fetching file IDs: {e}")
             return []
@@ -74,7 +81,7 @@ class NewSlideshow:
             }
 
             try:
-                self.__logger.debug(f"Fetching {current_batch} random indices from Random.org...")
+                self.__logger.debug_detailed(f"Fetching {current_batch} random indices from Random.org...")
                 res = requests.post(self.api_url, json=payload, timeout=10)
                 res.raise_for_status()
                 result = res.json()
@@ -93,13 +100,36 @@ class NewSlideshow:
         return all_randomized[:n_total]
 
     def build_groups_dynamic(self, file_id_list, folder_map):
-        portrait_ids = [fid for fid in file_id_list if folder_map[fid] == 2]
-        landscape_ids = [fid for fid in file_id_list if folder_map[fid] == 1]
+        # Fix folder ID mapping based on actual database structure
+        # folder_id=1: Square, folder_id=2: Landscape, folder_id=3: Portrait
+        portrait_ids = [fid for fid in file_id_list if folder_map[fid] == 3]
+        landscape_ids = [fid for fid in file_id_list if folder_map[fid] == 2]
+        square_ids = [fid for fid in file_id_list if folder_map[fid] == 1]
 
-        dominant_ids = portrait_ids if len(portrait_ids) >= len(landscape_ids) else landscape_ids
-        minority_ids = landscape_ids if dominant_ids == portrait_ids else portrait_ids
-        dominant_type = "portrait" if dominant_ids == portrait_ids else "landscape"
-        minority_type = "landscape" if dominant_type == "portrait" else "portrait"
+        # Group square images with either Landscape or Portrait based on configuration
+        if self.square_img.lower() == "portrait":
+            portrait_ids.extend(square_ids)
+            self.__logger.debug_detailed(
+                f"Grouping {len(square_ids)} square images with {len(portrait_ids) - len(square_ids)} portrait images"
+            )
+        else:  # Default to Landscape
+            landscape_ids.extend(square_ids)
+            self.__logger.debug_detailed(
+                f"Grouping {len(square_ids)} square images with {len(landscape_ids) - len(square_ids)} landscape images"
+            )
+
+        # Determine dominant and minority types (now only portrait vs landscape)
+        all_orientations = [("portrait", len(portrait_ids)), ("landscape", len(landscape_ids))]
+        all_orientations.sort(key=lambda x: x[1], reverse=True)
+
+        dominant_type, dominant_count = all_orientations[0]
+        minority_type, minority_count = all_orientations[1] if len(all_orientations) > 1 else all_orientations[0]
+
+        # Get the actual ID lists for dominant and minority types
+        type_to_ids = {"portrait": portrait_ids, "landscape": landscape_ids}
+
+        dominant_ids = type_to_ids[dominant_type]
+        minority_ids = type_to_ids[minority_type]
 
         total_images = len(file_id_list)
         num_groups = math.ceil(total_images / self.target_set_size)
@@ -192,13 +222,23 @@ class NewSlideshow:
                     for order, file_id in enumerate(ids, start=1):
                         if file_id in file_metadata:
                             basename, extension, width, height = file_metadata[file_id]
-                            orientation_text = "portrait" if height > width else "landscape"
-                            insert_data.append((g_num, order, file_id, basename, extension, orientation_text, 0))
+                            # Determine orientation text based on actual image dimensions
+                            if height > width:
+                                orientation_text = "portrait"
+                            elif width > height:
+                                orientation_text = "landscape"
+                            else:  # Square image
+                                # Use the group type to determine how square images are treated
+                                orientation_text = g_type
+                            insert_data.append(
+                                (g_num, order, file_id, basename, extension, orientation_text, time.time(), 0)
+                            )
 
                 c.executemany(
                     """
-                    INSERT INTO slideshow (group_num, order_in_group, file_id, basename, extension, orientation, played)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO slideshow (group_num, order_in_group, file_id, basename, extension,
+                                          orientation, created, played)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                     insert_data,
                 )
@@ -207,7 +247,7 @@ class NewSlideshow:
             self.__logger.warning(f"Error saving slideshow: {e}")
 
     def generate_slideshow(self):
-        self.__logger.debug("Loading image list from database...")
+        self.__logger.debug_detailed("Loading image list from database...")
 
         file_data = self.fetch_file_ids()
         if not file_data:
@@ -223,10 +263,10 @@ class NewSlideshow:
         else:
             self.__logger.info("Shuffle disabled. Using original order.")
 
-        self.__logger.debug("Building alternating groups...")
+        self.__logger.debug_detailed("Building alternating groups...")
         groups = self.build_groups_dynamic(file_ids, folder_map)
 
-        self.__logger.debug("Writing slideshow table...")
+        self.__logger.debug_detailed("Writing slideshow table...")
         self.save_to_slideshow(groups)
 
         self.__logger.info(f"Done. Created {len(groups)} groups.")
