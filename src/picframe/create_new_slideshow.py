@@ -53,8 +53,8 @@ class NewSlideshow:
                     self.__logger.warning("No files available for slideshow")
                     return None
                 if len(data) < self.min_set_size:
-                    return None
                     self.__logger.warning("Not enough files available to shuffle")
+                    return None
                 return data
 
         except Exception as e:
