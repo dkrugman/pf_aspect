@@ -48,7 +48,7 @@ class GetImageMeta:
                     self.__do_xmp_keywords(xmp)
             except Exception as e:
                 xmp = {}
-                self.__logger.warning("PILL getxmp() failed: %s -> %s", filename, e)
+                self.__logger.warning("XMP loading failed: %s -> %s", filename, e)
 
     @property
     def size(self) -> tuple[int, int]:
@@ -60,20 +60,26 @@ class GetImageMeta:
         self.__tags.update(tags)
 
     def __do_exif_tags(self, exif):
-        for key, value in TAGS.items():
-            if value == "ExifOffset":
-                break
-        info = exif.get_ifd(key)
-        tags = {"EXIF " + str(TAGS.get(key, key)): value for key, value in info.items()}
-        self.__tags.update(tags)
+        try:
+            for key, value in TAGS.items():
+                if value == "ExifOffset":
+                    break
+            info = exif.get_ifd(key)
+            tags = {"EXIF " + str(TAGS.get(key, key)): value for key, value in info.items()}
+            self.__tags.update(tags)
+        except Exception as e:
+            self.__logger.warning("EXIF processing failed for %s: %s", self.__filename, e)
 
     def __do_geo_tags(self, exif):
-        for key, value in TAGS.items():
-            if value == "GPSInfo":
-                break
-        gps_info = exif.get_ifd(key)
-        tags = {"GPS " + str(GPSTAGS.get(key, key)): value for key, value in gps_info.items()}
-        self.__tags.update(tags)
+        try:
+            for key, value in TAGS.items():
+                if value == "GPSInfo":
+                    break
+            gps_info = exif.get_ifd(key)
+            tags = {"GPS " + str(GPSTAGS.get(key, key)): value for key, value in gps_info.items()}
+            self.__tags.update(tags)
+        except Exception as e:
+            self.__logger.warning("GPS processing failed for %s: %s", self.__filename, e)
 
     def __find_xmp_key(self, key, dic):
         for k, v in dic.items():
@@ -233,12 +239,14 @@ class GetImageMeta:
 
     @staticmethod
     def get_image_object(fname):
+        logger = logging.getLogger(__name__)
         try:
+            # Normal image loading for all formats (HEIC converted to JPEG during processing)
             image = Image.open(fname)
-            if image.mode not in ("RGB", "RGBA"):  # mat system needs RGB or more
+
+            if image and image.mode not in ("RGB", "RGBA"):  # mat system needs RGB or more
                 image = image.convert("RGB")
         except Exception as e:  # the system should be able to withstand files being moved etc without crashing
-            logger = logging.getLogger(__name__)
             logger.warning('Can\'t open file: "%s"', fname)
             logger.warning("Cause: %s", e)
             image = None

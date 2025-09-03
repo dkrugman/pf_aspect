@@ -1,10 +1,17 @@
 {
 	"folders": [
 		{
-			"path": "../.."
+			"path": "."
 		},
 		{
-			"path": "../../../../picframe_data/config"
+			"path": ".."
+		},
+		{
+			"path": "../.."
 		}
-	]
+	],
+	"settings": {
+		"python.languageServer": "None",
+		"python.terminal.activateEnvInCurrentTerminal": true
+	}
 }
