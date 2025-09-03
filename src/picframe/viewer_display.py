@@ -264,7 +264,7 @@ class ViewerDisplay:
     def clock_is_on(self, val):
         self.__show_clock = val
 
-    def __orientate_image(self, im, pic):
+    def __orientate_image_and_frame(self, im, pic):
         ext = os.path.splitext(pic.fname)[1].lower()
         if pic.is_portrait and not (
             ext in (".heif", ".heic")
@@ -325,13 +325,13 @@ class ViewerDisplay:
                     resampling_kernel=self.__resampling_kernel,
                 )
 
-            # Load the image(s) and correct their orientation as necessary
+            # Load the image(s) and correct orientation as necessary
             if pic:
                 im = get_image_meta.GetImageMeta.get_image_object(pic.fname)
                 if im is None:
                     return None
                 # self.__logger.debug_detailed(f"im: {im.size}")
-                im = self.__orientate_image(im, pic)
+                im = self.__orientate_image_and_frame(im, pic)
 
             screen_aspect, image_aspect, diff_aspect = self.__get_aspect_diff(size, im.size)
 

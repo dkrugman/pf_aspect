@@ -68,54 +68,93 @@ class ProcessImages:
         return kernel_map.get(self.resampling_kernel.upper(), "lanczos3")  # Default to lanczos3 if unknown
 
     # === Image processing ===
-    async def process_image(self, file):
-        self.__logger.debug(f"Starting processing of {file.name}")
+    async def process_image(self, file_path):
+        """Process a single image asynchronously.
+
+        Args:
+            file_path: Path to the image file (str or Path object)
+        """
+        # Convert string path to Path object if needed
+        if isinstance(file_path, str):
+            file_path = Path(file_path)
+
+        self.__logger.debug(f"Starting processing of {file_path.name}")
 
         try:
             # Get image
-            image = pyvips.Image.new_from_file(str(file), access="sequential")
+            image = pyvips.Image.new_from_file(str(file_path), access="sequential")
+
             # Classify and scale image
-            scaled_image, category = self.classify_and_scale(image, file)
+            scaled_image, category = self.classify_and_scale(image, file_path)
             if scaled_image is None:
-                self.__logger.warning(f"Failed to classify and scale {file.name}")
+                self.__logger.warning(f"Failed to classify and scale {file_path.name}")
                 return
+
             # Crop image
-            processed_image, loss = self.smart_crop(scaled_image, file, category)
+            processed_image, loss = self.smart_crop(scaled_image, file_path, category)
             if processed_image is None:
-                self.__logger.warning(f"Failed to smart crop {file.name}")
+                self.__logger.warning(f"Failed to smart crop {file_path.name}")
                 return
-            # Save image
-            output_file = self.picture_dir / category / file.name
-            # self.__logger.debug_detailed(f"Attempting to save to: {output_file}")
-            # self.__logger.debug_detailed(f"Output file type: {type(output_file)}")
-            # self.__logger.debug_detailed(f"Output file path: {str(output_file)}")
+
+            # Save image (convert HEIC to JPEG for better compatibility)
+            original_name = file_path.name
+            if file_path.suffix.lower() in [".heic", ".heif"]:
+                # Convert HEIC to JPEG
+                jpeg_name = file_path.stem + ".jpg"
+                output_file = self.picture_dir / category / jpeg_name
+                self.__logger.info(f"Converting HEIC to JPEG: {original_name} -> {jpeg_name}")
+            else:
+                output_file = self.picture_dir / category / original_name
+
             try:
-                processed_image.write_to_file(str(output_file), Q=100)
+                if file_path.suffix.lower() in [".heic", ".heif"]:
+                    # Convert pyvips image to PIL for JPEG saving
+                    self.__logger.debug("Converting pyvips image to PIL for JPEG format")
+                    # Convert pyvips to numpy array then to PIL
+                    import numpy as np
+                    from PIL import Image
+
+                    # Get image data as numpy array
+                    np_array = np.ndarray(
+                        buffer=processed_image.write_to_memory(),
+                        dtype=np.uint8,
+                        shape=[processed_image.height, processed_image.width, processed_image.bands],
+                    )
+
+                    # Convert to PIL Image and save as JPEG
+                    pil_image = Image.fromarray(np_array)
+                    pil_image.save(str(output_file), "JPEG", quality=95, optimize=True)
+                    self.__logger.info(f"Successfully saved HEIC as JPEG: {output_file}")
+                else:
+                    # Save in original format using pyvips
+                    processed_image.write_to_file(str(output_file), Q=100)
             except Exception as e:
-                self.__logger.error(f"Failed to save {file.name}")
+                self.__logger.error(f"Failed to save {original_name}")
                 self.__logger.error(f"Save error details: {e}")
                 self.__logger.error(f"Save error type: {type(e)}")
                 raise
+
             # Add to database
             try:
                 with self.__db:
                     self.add_to_db(output_file)
-                self.__logger.debug(f"Successfully processed {file.name}")
+                self.__logger.debug(f"Successfully processed {file_path.name}")
             except Exception as e:
-                self.__logger.error(f"Failed to add {file.name} to database: {e}")
+                self.__logger.error(f"Failed to add {file_path.name} to database: {e}")
+
             # Delete original file after successful database addition
             try:
                 # Check if file still exists before trying to delete
-                if file.exists():
-                    file.unlink()
-                    self.__logger.debug(f"Deleted imported file: {file}")
+                if file_path.exists():
+                    file_path.unlink()
+                    self.__logger.debug(f"Deleted imported file: {file_path}")
                 else:
-                    self.__logger.debug_detailed(f"File {file.name} was already deleted by another worker")
+                    self.__logger.debug_detailed(f"File {file_path.name} was already deleted by another worker")
             except Exception as e:
-                self.__logger.error(f"Failed to delete {file.name}: {e}")
-            return
+                self.__logger.error(f"Failed to delete {file_path.name}: {e}")
+
         except Exception as e:
-            self.__logger.error(f"Failed to process {file.name}: {e}")
+            self.__logger.error(f"Failed to process {file_path.name}: {e}")
 
     def classify_and_scale(self, image, file):
         try:
@@ -245,7 +284,7 @@ class ProcessImages:
                         self.__logger.debug_verbose(
                             f"File lock acquired, processing: {file.name} (size: {file.stat().st_size} bytes)"
                         )
-                        await asyncio.to_thread(self.process_image, file)
+                        await self.process_image(file)
             except Exception as e:
                 self.__logger.error(f"Error processing {file.name}: {e}")
             finally:
@@ -259,38 +298,10 @@ class ProcessImages:
 
         self.__logger.debug_detailed("Process Images Done.")
 
+    # Legacy alias for backwards compatibility
     async def process_single_image_async(self, file_path):
-        """Process a single image asynchronously."""
-        try:
-            # Convert string path to Path object if needed
-            if isinstance(file_path, str):
-                file_path = Path(file_path)
-
-            self.__logger.info(f"Starting async processing of {file_path.name}")
-
-            # Process the image
-            scaled_file = self.classify_and_scale(file_path)
-            if scaled_file is None:
-                self.__logger.warning(f"Failed to classify and scale {file_path.name}")
-                return
-
-            processed_file = self.smart_crop(scaled_file)
-            if processed_file is None:
-                self.__logger.warning(f"Failed to smart crop {file_path.name}")
-                return
-
-            # Add to database and clean up
-            try:
-                with self.__db:
-                    self.add_to_db(processed_file)
-                self.__logger.info(f"Successfully processed {file_path.name}")
-                file_path.unlink()
-                self.__logger.info(f"Deleted imported file: {file_path}")
-            except Exception as e:
-                self.__logger.error(f"Failed to add {file_path.name} to database: {e}")
-
-        except Exception as e:
-            self.__logger.error(f"Failed to process {file_path.name}: {e}")
+        """Legacy method - use process_image() instead."""
+        await self.process_image(file_path)
 
     def cleanup(self):
         """Clean up database connection."""
