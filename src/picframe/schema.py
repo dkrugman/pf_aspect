@@ -6,18 +6,21 @@ Defines the database schema for picframe and provides schema creation utilities.
 
 REQUIRED_SCHEMA_VERSION = 3
 
+
 def create_schema(db):
     """Creates or upgrades the database schema to REQUIRED_SCHEMA_VERSION."""
-
+    # Slideshow table is here because it is part of the schema, but always gets dropped and recreated
     sql_slideshow_table = """
         CREATE TABLE IF NOT EXISTS slideshow (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            file_id      INTEGER NOT NULL,
-            basename     TEXT NOT NULL,
-            extension    TEXT NOT NULL,
-            orientation  TEXT NOT NULL,
-            created      REAL DEFAULT 0 NOT NULL,
-            played       INTEGER DEFAULT 0 NOT NULL
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_num      INTEGER NOT NULL,
+            order_in_group INTEGER NOT NULL,
+            file_id        INTEGER NOT NULL,
+            basename       TEXT NOT NULL,
+            extension      TEXT NOT NULL,
+            orientation    TEXT NOT NULL,
+            created        REAL DEFAULT 0 NOT NULL,
+            played         INTEGER DEFAULT 0 NOT NULL
         )"""
 
     sql_imported_playlists_table = """
@@ -26,6 +29,7 @@ def create_schema(db):
             source         TEXT NOT NULL,
             playlist_name  TEXT NOT NULL,
             playlist_id    INTEGER,
+            src_version    INTEGER,
             picture_count  INTEGER,
             last_modified  REAL DEFAULT 0 NOT NULL,
             last_imported  REAL DEFAULT 0 NOT NULL,
@@ -39,7 +43,7 @@ def create_schema(db):
             playlist_id    TEXT NOT NULL,
             media_item_id  TEXT,
             original_url   TEXT,
-            basename       TEXT NOT NULL,     
+            basename       TEXT NOT NULL,
             extension      TEXT NOT NULL,
             nix_caption    TEXT,
             width          INTEGER,
@@ -69,10 +73,11 @@ def create_schema(db):
             extension       TEXT NOT NULL,
             width           INTEGER,
             height          INTEGER,
+            creation_time   REAL DEFAULT 0 NOT NULL,
             last_modified   REAL DEFAULT 0 NOT NULL,
             displayed_count INTEGER DEFAULT 0 NOT NULL,
             last_displayed  REAL DEFAULT 0 NOT NULL,
-            UNIQUE(folder_id, source, playlist, basename, extension)
+            UNIQUE(folder_id, basename, extension, width, height, creation_time)
         )"""
 
     sql_meta_table = """
@@ -120,6 +125,7 @@ def create_schema(db):
         AS
         SELECT
             folder.name || "/" || file.basename || "." || file.extension AS fname,
+            file.creation_time,
             file.last_modified,
             meta.*,
             meta.height > meta.width as is_portrait,
@@ -163,7 +169,7 @@ def create_schema(db):
         sql_clean_file_trigger,
         sql_clean_meta_trigger,
         "DELETE FROM db_info",
-        f"INSERT INTO db_info VALUES({REQUIRED_SCHEMA_VERSION})"
+        f"INSERT INTO db_info VALUES({REQUIRED_SCHEMA_VERSION})",
     ]
 
     cur = db.cursor()

@@ -1,6 +1,6 @@
 name: flake8 & pytest
 
-on: 
+on:
   [push]
 
 jobs:

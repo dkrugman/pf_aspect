@@ -97,8 +97,8 @@ model:
   db_file: "~/picframe_data/data/pictureframe.db3" # database used by PictureFrame
   location_filter: ""                     # default="" filter clause for image location
   tags_filter: ""                         # default="" filter clause for image tags
-  log_level: "WARNING"                    # default=WARNING, could beDEBUG, INFO, WARNING, ERROR, CRITICAL
-  root_log_level: "ERROR"                 # default=ERROR, log level for installed modules 
+  log_level: "WARNING"                    # default=WARNING, could be DEBUG_VERBOSE, DEBUG_DETAILED, DEBUG_BASIC, DEBUG, INFO, WARNING, ERROR, CRITICAL
+  root_log_level: "ERROR"                 # default=ERROR, log level for installed modules
   log_file: ""                            # default="" for debugging set this to the path to a file. NB logging messages will
                                           # appended indefinitely so don't forget this. You will need to tidy it up later
 
@@ -149,15 +149,23 @@ peripherals:
 
 aspect:
   enable: True                            # default=True
+  frame_id: "ASPECT_001"                  # unique id of the frame
   import_dir: "~/Pictures/Imports"        # location for imported photos before processing
   import_interval: 900                    # secsonds between checks for updates from cloud default: 900 (15 min)
   process_interval: 300                   # secsonds between checks for files to process defsult: 300 (5 min)
+
+  # Import throttling configuration to prevent database overload
+  max_concurrent_downloads: 3             # maximum concurrent file downloads (default: 3)
+  max_concurrent_db_operations: 1         # maximum concurrent database operations (default: 1)
+  download_batch_size: 5                  # number of items to process in each batch (default: 5)
   min_rotation_interval: 30               # minimum time in seconds between rotations
   rotation_timeout: 30                    # max time before error
-  target_set_size: 10                     # target number of images in each orientation  
+  target_set_size: 10                     # target number of images in each orientation
   min_set_size: 3                         # minimum number of images in each orientation
   JPEG_XL: True                           # Use JPEG XL for image processing
-  square_img: "Landscape"                 # display mode for square images, "Landscape" or "Portrait"
+  smart_crop: True                        # Use attention-based cropping instead of center cropping (default: True)
+  resampling_kernel: "LANCZOS"            # Resampling kernel for image scaling: "BICUBIC", "LANCZOS", "NEAREST", "BOX", "HAMMING", "BILINEAR" (default: "LANCZOS")
+  square_img: "Landscape"                 # display mode for square images, "Landscape" (default) or "Portrait"
   width: 2894                             # width of the display in pixels
   height: 2160                            # height of the display in pixels
   sources:

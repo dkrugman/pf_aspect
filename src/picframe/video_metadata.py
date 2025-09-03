@@ -1,9 +1,10 @@
 """
 Video metadata handling module for picframe.
 """
-from typing import Optional, Tuple, Any
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any, Optional, Tuple
+
 
 @dataclass
 class VideoMetadata:
@@ -39,6 +40,7 @@ class VideoMetadata:
         exif_datetime (Optional[float]): The creation date as a Unix timestamp, for compatibility
             with image metadata.
     """
+
     width: int
     height: int
     sample_aspect_ratio: str

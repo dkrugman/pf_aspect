@@ -1,7 +1,15 @@
-import logging, sys, time, subprocess, inspect, typing, pi3d #type: ignore
+import inspect
+import logging
+import subprocess
+import sys
+import time
+import typing
+
 import numpy as np
+import pi3d  # type: ignore
 
 logger = logging.getLogger(__name__)
+
 
 class InterfacePeripherals:
     """Opens connections to peripheral interfaces and reacts to their state to handle user input.
@@ -14,7 +22,7 @@ class InterfacePeripherals:
     """
 
     def __init__(self, model, viewer, controller) -> None:
-        logger.info("creating an instance of InterfacePeripherals")
+        logger.debug_detailed("Creating an instance of InterfacePeripherals")
 
         self.__model = model
         self.__viewer = viewer
@@ -22,7 +30,7 @@ class InterfacePeripherals:
 
         self.__input_type = self.__model.get_peripherals_config()["input_type"]
         if not self.__input_type:
-            logger.info("peripheral input is disabled")
+            logger.debug("peripheral input is disabled")
             return
         valid_input_types = {"keyboard", "touch", "mouse"}
         if self.__input_type not in valid_input_types:
@@ -271,7 +279,8 @@ class InterfacePeripherals:
 
     def __handle_mouse_input(self) -> None:
         if self.__pointer_moved():
-            if self.__timestamp > self.__last_check_display_on + 2.0: # this @getter is potentially expensive to run so will slow the mouse
+            # this @getter is potentially expensive to run so will slow the mouse
+            if self.__timestamp > self.__last_check_display_on + 2.0:
                 self.__last_check_display_on = self.__timestamp
                 if self.controller.display_is_on:
                     self.controller.display_is_on = True
@@ -310,16 +319,17 @@ class InterfacePeripherals:
         return False
 
     def __handle_click(self) -> None:
-        logger.debug("handling click at position x: %s, y: %s", *self.__pointer_position)
+        logger.debug_detailed("handling click at position x: %s, y: %s", *self.__pointer_position)
         self.__gui.check(*self.__pointer_position)
 
     def __go_back(self, position) -> None:
-        logger.info("navigation: previous picture")
+        logger.debug("navigation: previous picture")
         self.controller.back()
 
     def __go_next(self, position) -> None:
-        logger.info("navigation: next picture")
+        logger.debug("navigation: next picture")
         self.controller.next()
+
 
 class IPMenuItem(pi3d.MenuItem):
     """Wrapper around pi3d.MenuItem that implements `action` method.
@@ -328,6 +338,7 @@ class IPMenuItem(pi3d.MenuItem):
 
     A subclass must imlement class variable `config_name` that matches its name in the configuration.
     """
+
     config_name = ""
 
     def __init__(self, ip: "InterfacePeripherals", gui: "pi3d.Gui", text: str, shortcut: str) -> None:
@@ -339,7 +350,7 @@ class IPMenuItem(pi3d.MenuItem):
         """
         Logs each action.
         """
-        logger.info("invoked menu item: %s", self.config_name)
+        logger.debug("invoked menu item: %s", self.config_name)
         self.action()
 
     def action(self) -> None:
@@ -347,6 +358,7 @@ class IPMenuItem(pi3d.MenuItem):
         A subclass must override this method to define its business logic.
         """
         raise NotImplementedError
+
 
 class PauseMenuItem(IPMenuItem):
     """Pauses or unpauses the playback.
@@ -358,6 +370,7 @@ class PauseMenuItem(IPMenuItem):
     def action(self):
         self.ip.controller.paused = not self.ip.controller.paused
 
+
 class DisplayOffMenuItem(IPMenuItem):
     """Turns off the display. When the display is off,
     any input from the selected peripheral device will turn it back on.
@@ -367,6 +380,7 @@ class DisplayOffMenuItem(IPMenuItem):
 
     def action(self):
         self.ip.controller.display_is_on = False
+
 
 class LocationMenuItem(IPMenuItem):
     """Shows or hides location information."""
@@ -379,6 +393,7 @@ class LocationMenuItem(IPMenuItem):
         else:
             self.ip.controller.set_show_text("location", "ON")
 
+
 class ExitMenuItem(IPMenuItem):
     """Exits the program."""
 
@@ -386,6 +401,7 @@ class ExitMenuItem(IPMenuItem):
 
     def action(self):
         self.ip.controller.stop()
+
 
 class PowerDownMenuItem(IPMenuItem):
     """Exits the program and shuts down the device. Uses sudo."""

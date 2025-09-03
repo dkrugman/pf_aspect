@@ -1,49 +1,44 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-from typing import Optional
-import time
-import os
-import logging
-import json
-import threading
 import base64
 import io
-from PIL import Image
+import json
+import logging
+import os
+import socket
+import threading
+import time
+import urllib.parse as urlparse
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import Optional
 
-try:
-    from http.server import BaseHTTPRequestHandler, HTTPServer  # py3
-    import urllib.parse as urlparse
-except ImportError:
-    from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer  # py2
-    import urlparse
+from PIL import Image
 
 try:
     from pi_heif import register_heif_opener
 except ImportError:
     register_heif_opener = None
 
-EXTENSIONS = [".jpg", ".jpeg", ".png"]
+EXTENSIONS = [".jpg", ".jpeg", ".png", ".jxl", ".webp"]
 EXTENSION_TO_MIMETYPE = {
     # Videos
-    '.mp4': 'video/mp4',
-    '.mkv': 'video/x-matroska',
-    '.flv': 'video/x-flv',
-    '.mov': 'video/quicktime',
-    '.avi': 'video/x-msvideo',
-    '.webm': 'video/webm',
-    '.hevc': 'video/mp4',  # HEVC usually wrapped in MP4 container
-
+    ".mp4": "video/mp4",
+    ".mkv": "video/x-matroska",
+    ".flv": "video/x-flv",
+    ".mov": "video/quicktime",
+    ".avi": "video/x-msvideo",
+    ".webm": "video/webm",
+    ".hevc": "video/mp4",  # HEVC usually wrapped in MP4 container
     # Images
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.png': 'image/png'
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".jxl": "image/jxl",
+    ".webp": "image/webp",
 }
 if register_heif_opener is not None:
     EXTENSIONS += [".heif", ".heic"]
-    EXTENSION_TO_MIMETYPE.update({
-        '.heif': 'image/heif',
-        '.heic': 'image/heic'
-    })
+    EXTENSION_TO_MIMETYPE.update({".heif": "image/heif", ".heic": "image/heic"})
 
 
 def heif_to_image(fname: str) -> Optional[Image.Image]:
@@ -69,6 +64,7 @@ def heif_to_image(fname: str) -> Optional[Image.Image]:
     try:
         try:
             from pi_heif import register_heif_opener
+
             register_heif_opener()
         except ImportError:
             register_heif_opener = None
@@ -82,17 +78,79 @@ def heif_to_image(fname: str) -> Optional[Image.Image]:
         logger.warning("Failed attempt to convert %s due to %s \n** Have you installed pi_heif? **", fname, e)
         return None
 
-class RequestHandler(BaseHTTPRequestHandler):
 
+def is_port_available(port: int, host: str = "0.0.0.0") -> bool:
+    """
+    Check if a port is available for binding.
+
+    Args:
+        port (int): The port number to check
+        host (str): The host address to check (default: "0.0.0.0")
+
+    Returns:
+        bool: True if port is available, False otherwise
+    """
+    try:
+        # First try to bind to the port to see if it's available
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.bind((host, port))
+            return True
+    except OSError:
+        # Port is already in use
+        return False
+    except Exception:
+        # Other errors, assume port is not available
+        return False
+
+
+def check_picframe_processes():
+    """
+    Check if there are other picframe processes running.
+
+    Returns:
+        list: List of PIDs of running picframe processes
+    """
+    import subprocess
+
+    try:
+        result = subprocess.run(["pgrep", "-f", "picframe"], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            pids = result.stdout.strip().split("\n")
+            return [pid for pid in pids if pid]
+        return []
+    except Exception:
+        return []
+
+
+def find_available_port(start_port: int, max_attempts: int = 10) -> int:
+    """
+    Find an available port starting from start_port.
+
+    Args:
+        start_port (int): The port to start searching from
+        max_attempts (int): Maximum number of ports to try
+
+    Returns:
+        int: An available port, or start_port if none found
+    """
+    for i in range(max_attempts):
+        port = start_port + i
+        if is_port_available(port):
+            return port
+    return start_port  # Return original port if none available
+
+
+class RequestHandler(BaseHTTPRequestHandler):
     def do_AUTHHEAD(self):
         if self.server._auth is not None:
-            if self.headers.get("Authorization") == None:
+            if self.headers.get("Authorization") is None:
                 self.send_response(401)
                 self.send_header("WWW-Authenticate", 'Basic realm="Restricted"')
                 self.send_header("Content-type", "text/html")
                 self.end_headers()
                 response_message = "Error: No authorization header received. Please provide valid credentials.\n"
-                self.wfile.write(response_message.encode('utf-8'))
+                self.wfile.write(response_message.encode("utf-8"))
                 self.connection.close()
                 return False
             elif self.headers.get("Authorization") != "Basic " + self.server._auth:
@@ -100,7 +158,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.send_header("Content-type", "text/html")
                 self.end_headers()
                 response_message = "Error: Invalid authentication credentials. Access denied.\n"
-                self.wfile.write(response_message.encode('utf-8'))
+                self.wfile.write(response_message.encode("utf-8"))
                 self.connection.close()
                 return False
         return True
@@ -123,10 +181,11 @@ class RequestHandler(BaseHTTPRequestHandler):
                 if extension not in [".html", ".js", ".css"]:
                     page = self.server._controller.get_current_path()
                     extension = os.path.splitext(page)[1].lower()
-                    content_type = EXTENSION_TO_MIMETYPE.get(extension, 'application/octet-stream')
+                    content_type = EXTENSION_TO_MIMETYPE.get(extension, "application/octet-stream")
                     if html_page != "current_image_original":
-                        from picframe.video_streamer import VIDEO_EXTENSIONS
-                        if extension in ('.heic', '.heif'):
+                        from .video_streamer import VIDEO_EXTENSIONS
+
+                        if extension in (".heic", ".heif"):
                             # as current_image may be heic
                             image = heif_to_image(page)
                             if image is not None:
@@ -136,13 +195,13 @@ class RequestHandler(BaseHTTPRequestHandler):
                                 page_bytes = buf.read()
                             else:
                                 page_bytes = b""
-                            content_type = EXTENSION_TO_MIMETYPE['.jpg']
+                            content_type = EXTENSION_TO_MIMETYPE[".jpg"]
                             is_bytes = True
                         elif extension in VIDEO_EXTENSIONS:
                             # as current_image may be video
                             file = os.path.splitext(page)[0]
                             page = file + ".1.frame"
-                            content_type = EXTENSION_TO_MIMETYPE['.jpg']
+                            content_type = EXTENSION_TO_MIMETYPE[".jpg"]
                             is_bytes = False
                         else:
                             is_bytes = False
@@ -155,14 +214,16 @@ class RequestHandler(BaseHTTPRequestHandler):
                 page = urlparse.unquote(page)
                 if (not is_bytes and os.path.isfile(page)) or is_bytes:
                     self.send_response(200)
-                    self.send_header('Content-type', content_type)
+                    self.send_header("Content-type", content_type)
                     file_size = os.path.getsize(page)
-                    self.send_header('Content-Length', str(file_size))
+                    self.send_header("Content-Length", str(file_size))
                     filename = os.path.basename(page)
                     if is_bytes:
                         filename += ".jpg"
                     filename_encoded = urlparse.quote(filename)
-                    self.send_header('Content-Disposition', f'inline; filename="{filename}"; filename*=utf-8\'\'{filename_encoded}')
+                    self.send_header(
+                        "Content-Disposition", f"inline; filename=\"{filename}\"; filename*=utf-8''{filename_encoded}"
+                    )
                     # TODO check if html or js - in which case application/javascript
                     # really should filter out attempts to render all other file types (jpg etc?)
                     self.end_headers()
@@ -182,18 +243,26 @@ class RequestHandler(BaseHTTPRequestHandler):
                 start_time = time.time()
                 message = {}
                 self.send_response(200)
-                self.server._logger.debug('http request from: ' + self.client_address[0])
+                self.server._logger.debug("http request from: " + self.client_address[0])
 
                 for key, value in dict(urlparse.parse_qsl(path_split[1], True)).items():
-                    self.send_header('Content-type', 'text')
+                    self.send_header("Content-type", "text")
                     self.end_headers()
                     if key == "all":
                         for subkey in self.server._setters:
                             message[subkey] = getattr(self.server._controller, subkey)
                     elif key in dir(self.server._controller):
-                        if value != "" or key in ("subdirectory", "location_filter", "tags_filter"):  # parse_qsl can return empty string for value when just querying
+                        if value != "" or key in (
+                            "subdirectory",
+                            "location_filter",
+                            "tags_filter",
+                        ):  # parse_qsl can return empty string for value when just querying
                             lwr_val = value.lower()
-                            if lwr_val in ("true", "on", "yes"):  # this only works for simple values *not* json style kwargs # noqa: E501
+                            if lwr_val in (
+                                "true",
+                                "on",
+                                "yes",
+                            ):  # this only works for simple values *not* json style kwargs # noqa: E501
                                 value = True
                             elif lwr_val in ("false", "off", "no"):
                                 value = False
@@ -201,11 +270,11 @@ class RequestHandler(BaseHTTPRequestHandler):
                                 if key in self.server._setters:
                                     setattr(self.server._controller, key, value)
                                 else:
-                                    value = value.replace("\'", "\"")  # only " permitted in json
+                                    value = value.replace("'", '"')  # only " permitted in json
                                     # value must be json kwargs
                                     getattr(self.server._controller, key)(**json.loads(value))
                             except Exception as e:
-                                message['ERROR'] = 'Excepton:{}>{};'.format(key, e)
+                                message["ERROR"] = "Excepton:{}>{};".format(key, e)
                         if key in self.server._setters:  # can get info back from controller TODO
                             message[key] = getattr(self.server._controller, key)
 
@@ -213,7 +282,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     self.connection.close()
                     page_ok = True
 
-                self.server._logger.info(message)
+                self.server._logger.debug(message)
                 self.server._logger.debug("request finished in:  %s seconds" % (time.time() - start_time))
             if not page_ok:
                 self.send_response(404)
@@ -236,39 +305,67 @@ class RequestHandler(BaseHTTPRequestHandler):
             super().end_headers()
         except BrokenPipeError as e:
             self.connection.close()
-            self.server._logger.error('httpserver error: {}'.format(e))
+            self.server._logger.error("httpserver error: {}".format(e))
 
 
 class InterfaceHttp(HTTPServer):
-    def __init__(
-            self,
-            controller,
-            html_path,
-            pic_dir,
-            no_files_img,
-            port=9000,
-            auth=False,
-            username=None,
-            password=None,
-        ):
+    def __init__(self, controller, path, pic_dir, no_files_img, port, auth, username, password):
+        self._controller = controller
+        self._path = path
+        self._pic_dir = pic_dir
+        self._no_files_img = no_files_img
+        self._port = port
+        self._auth = auth
+        self._username = username
+        self._password = password
+        # Check if port is available before trying to bind
+        if not is_port_available(port):
+            # Check if there are other picframe processes running
+            other_pids = check_picframe_processes()
+            current_pid = os.getpid()
+
+            if other_pids and any(pid != str(current_pid) for pid in other_pids):
+                error_msg = (
+                    f"Port {port} is already in use by another picframe process (PIDs: {', '.join(other_pids)})."
+                )
+                error_msg += "\nThis Raspberry Pi is dedicated to picframe, so only one instance should be running."
+                logger = logging.getLogger(__name__)
+                logger.error(error_msg)
+                raise OSError(
+                    f"[Errno 98] Address already in use: Port {port} is occupied by another picframe process. "
+                    f"PIDs: {', '.join(other_pids)}"
+                )
+            else:
+                error_msg = f"Port {port} is already in use by an unknown process."
+                error_msg += "\nSince this is a dedicated picframe device, this suggests a system issue."
+                logger = logging.getLogger(__name__)
+                logger.error(error_msg)
+                raise OSError(f"[Errno 98] Address already in use: Port {port} is occupied by an unknown process")
+
         super(InterfaceHttp, self).__init__(("0.0.0.0", port), RequestHandler)
         # NB name mangling throws a spanner in the works here!!!!!
         # *no* __dunders
         self._logger = logging.getLogger(__name__)
-        self._logger.info("creating an instance of InterfaceHttp")
+        self._logger.debug_detailed(f"creating an instance of InterfaceHttp on port {port}")
         self._controller = controller
         self._pic_dir = os.path.expanduser(pic_dir)
         self._no_files_img = os.path.expanduser(no_files_img)
-        self._html_path = os.path.expanduser(html_path)
+        self._html_path = os.path.expanduser(path)
         self._auth = None
         if auth:
             self._auth = base64.b64encode(f"{username}:{password}".encode()).decode()
         # TODO check below works with all decorated methods.. seems to work
         controller_class = controller.__class__
-        self._setters = [method for method in dir(controller_class)
-                         if 'setter' in dir(getattr(controller_class, method))]
+        self._setters = [
+            method for method in dir(controller_class) if "setter" in dir(getattr(controller_class, method))
+        ]
         t = threading.Thread(target=self.serve_forever)
         t.start()
+
+    @property
+    def port(self):
+        """Get the actual port being used by the HTTP server."""
+        return self.server_address[1]
 
     def stop(self):
         t = threading.Thread(target=self.shutdown, daemon=True)

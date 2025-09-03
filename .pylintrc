@@ -1,4 +1,24 @@
+[MASTER]
+disable=
+    C0114, # missing-module-docstring
+    C0115, # missing-class-docstring
+    C0116, # missing-function-docstring
+    R0903, # too-few-public-methods
+    R0913, # too-many-arguments
+    R0914, # too-many-locals
+    W0621, # redefined-outer-name
+    W0622, # redefined-builtin
+
 [TYPECHECK]
 generated-members=cv2.*
+
 [FORMAT]
-max-line-length=100
+max-line-length=120
+
+[MESSAGES CONTROL]
+disable=C0111
+
+[REPORTS]
+output-format=text
+reports=no
+score=no

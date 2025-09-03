@@ -33,7 +33,7 @@ jobs:
 
       - name: Publish package distributions to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
-      
+
       - name: Build Changelog
         id: github_release
         uses: mikepenz/release-changelog-builder-action@v3.7.0
@@ -53,5 +53,4 @@ jobs:
           files: |
             dist/picframe-*.tar.gz, dist/picframe-*.whl
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
-
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

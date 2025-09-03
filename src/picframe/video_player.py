@@ -2,17 +2,18 @@
 This module provides a `VideoPlayer` class that manages video playback
 in a dedicated SDL2 window using VLC.
 """
-import sys
-import time
 import argparse
 import ctypes
 import logging
-import threading
-import queue
-from typing import Optional
 import os
-import vlc  # type: ignore
+import queue
+import sys
+import threading
+import time
+from typing import Optional
+
 import sdl2  # type: ignore
+import vlc  # type: ignore
 
 
 class VideoPlayer:
@@ -59,13 +60,10 @@ class VideoPlayer:
         """Initialize SDL2, create window, and set up VLC player."""
         sdl2.SDL_Init(sdl2.SDL_INIT_VIDEO)
         self.window = sdl2.SDL_CreateWindow(
-            b"Video Player",
-            self.x, self.y,
-            self.w, self.h,
-            sdl2.SDL_WINDOW_HIDDEN | sdl2.SDL_WINDOW_BORDERLESS
+            b"Video Player", self.x, self.y, self.w, self.h, sdl2.SDL_WINDOW_HIDDEN | sdl2.SDL_WINDOW_BORDERLESS
         )
         if not self.window:
-            self.logger.error("Error creating window: %s", sdl2.SDL_GetError().decode('utf-8'))
+            self.logger.error("Error creating window: %s", sdl2.SDL_GetError().decode("utf-8"))
             return False
 
         sdl2.SDL_ShowCursor(sdl2.SDL_DISABLE)
@@ -74,17 +72,18 @@ class VideoPlayer:
         wm_info = sdl2.SDL_SysWMinfo()
         sdl2.SDL_VERSION(wm_info.version)
         if not sdl2.SDL_GetWindowWMInfo(self.window, ctypes.byref(wm_info)):
-            self.logger.error("Error: Could not get window information! SDL Error: %s",
-                              sdl2.SDL_GetError().decode('utf-8'))
+            self.logger.error(
+                "Error: Could not get window information! SDL Error: %s", sdl2.SDL_GetError().decode("utf-8")
+            )
             sdl2.SDL_DestroyWindow(self.window)
             return False
-        if not hasattr(wm_info, 'info'):
+        if not hasattr(wm_info, "info"):
             self.logger.error("Error: wm_info structure does not have 'info' attribute!")
             sdl2.SDL_DestroyWindow(self.window)
             return False
 
         # Initialize VLC
-        vlc_args = ['--no-audio', '--quiet', '--verbose=0']
+        vlc_args = ["--no-audio", "--quiet", "--verbose=0"]
         try:
             self.instance = vlc.Instance(vlc_args)
             self.player = self.instance.media_player_new()
@@ -100,6 +99,7 @@ class VideoPlayer:
             try:
                 if sdl2.SDL_GetWindowWMInfo(self.window, ctypes.byref(wm_info)):
                     from rubicon.objc import ObjCInstance  # type: ignore  # pylint: disable=import-outside-toplevel
+
                     nswindow_ptr = wm_info.info.cocoa.window
                     nswindow = ObjCInstance(ctypes.c_void_p(nswindow_ptr))
                     nsview = nswindow.contentView
@@ -192,7 +192,7 @@ class VideoPlayer:
     def _send_state(self, state: str) -> None:
         """Send state to stdout only if it changed."""
         if state != self.last_state:
-            self.logger.info("State changed to: %s", state)
+            self.logger.debug("State changed to: %s", state)
             print(f"STATE:{state}", flush=True)
             self.last_state = state
 
@@ -270,7 +270,7 @@ class VideoPlayer:
                         sdl2.SDL_ShowCursor(sdl2.SDL_DISABLE)
                         sdl2.SDL_WarpMouseInWindow(self.window, self.w - 1, self.h - 1)
                     self._show_window_request = False
-                
+
                 if sdl2.SDL_ShowCursor(sdl2.SDL_QUERY) == 1:
                     self.logger.debug("Mouse pointer is visible, hiding it.")
                     sdl2.SDL_ShowCursor(sdl2.SDL_DISABLE)
@@ -286,7 +286,7 @@ class VideoPlayer:
 
                 # Only handle commands
                 try:
-                    line = self.cmd_queue.get(timeout=0.1) 
+                    line = self.cmd_queue.get(timeout=0.1)
                 except queue.Empty:
                     line = None
                 if line:
@@ -331,9 +331,9 @@ class VideoPlayer:
         while not shown and (time.time() - start_time) < timeout:
             while sdl2.SDL_PollEvent(ctypes.byref(self.event)) != 0:
                 if (
-                    self.event.type == sdl2.SDL_WINDOWEVENT and
-                    self.event.window.event == sdl2.SDL_WINDOWEVENT_SHOWN and
-                    self.event.window.windowID == window_id
+                    self.event.type == sdl2.SDL_WINDOWEVENT
+                    and self.event.window.event == sdl2.SDL_WINDOWEVENT_SHOWN
+                    and self.event.window.windowID == window_id
                 ):
                     shown = True
                     break
@@ -341,9 +341,7 @@ class VideoPlayer:
                 break
             time.sleep(0.01)
         if not shown:  # If timeout occurred
-            self.logger.warning(
-                "Player window not shown within %d seconds.", timeout
-                )
+            self.logger.warning("Player window not shown within %d seconds.", timeout)
         return shown
 
 
@@ -361,8 +359,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--w", type=int, default=640)
     parser.add_argument("--h", type=int, default=480)
     parser.add_argument("--fit_display", action="store_true")
-    parser.add_argument("--log_level", type=str, default="info", choices=["debug", "info", "warning", "error", "critical"],
-                        help="Set the logging level (default: info)")
+    parser.add_argument(
+        "--log_level",
+        type=str,
+        default="info",
+        choices=["debug", "info", "warning", "error", "critical"],
+        help="Set the logging level (default: info)",
+    )
     return parser.parse_args()
 
 
